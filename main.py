@@ -19,6 +19,10 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader, dataset
 from tqdm import tqdm
 from collections import defaultdict
+
+
+import h5py
+
 # %%
 
 model = HookedSAETransformer.from_pretrained("gpt2")
@@ -178,30 +182,37 @@ class ActivationsColector:
 
     def __init__(self,
                  model:HookedSAETransformer,
-                 dataset: DataLoader,
+                 dataset,
                  ctx_len: int,
-                 modules: List[HookPoint],
-                 location_dictionary: Dict,
+                 modules: List[str],
+                 location_dictionary: dict,
                  cat_activations: bool = False,
+                 quantize: bool = True
 
                  ):
 
 
 
-        self.dataset = dataset
+        self.dataset = DataLoader(dataset, batch_size = 4)
         self.model = model  
         self.ctx_len = ctx_len
         self.modules = modules
         self.modules = modules 
         self.cat_activations = cat_activations
         self.location_dictionary = location_dictionary
+        self.quantize = quantize
+
+
+        self.activations = self.collect_activations()
+        #self.quantize_activations()
 
 
 
     def collect_activations(self):
-        activations = defaultdict(list)
+        activations = {}
 
         for i,d in tqdm(enumerate(self.dataset)):# Select the batch
+
             batch_activations_dict = {}
             input_ids = d['tokens']
             if f"Batch {i}" not in self.location_dictionary:
@@ -213,17 +224,57 @@ class ActivationsColector:
                     _,cache = model.run_with_cache(seq)# Get all the activations (this needs to be changed)
                     act_seq = {}
                     for hook in self.modules:
-                        act = cache[hook.name]
+                        act = cache[hook]
                         act_hook_pos = {}
                         for tup in doc_list:
-                            act_hook_pos[str(tup)]= act[tup[0]:tup[1]+1]# Add the activations for the correct predictions positions
-                        act_seq[hook.name].append(act_hook_pos) # Add the activations for the module
-                batch_activations_dict[doc].append(act_seq) # Add the activations for the document
-            activations[f"Batch {i}"].append(batch_activations_dict)
+                            x = act[:,tup[0]:tup[1]+1]
+                            act_hook_pos[str(tup)]= x.to("cpu").numpy()# Add the activations for the correct predictions positions
+                        act_seq[hook] = act_hook_pos # Add the activations for the module
+                batch_activations_dict[doc] = act_seq # Add the activations for the document
+            activations[f"Batch {i}"] = batch_activations_dict
 
         return activations
 
+    def save_activations(self, compression = "gzip", chunks_size = None):
 
+        if self.quantize:
+            self.activations = self.quantize_activations()
+        with h5py.File("activations.h5","w") as f:
+
+            for batch, batch_dict in self.activations.items():# Get the batch
+                for doc, doc_list in batch_dict.items():# Get the document
+                    for hook, hook_dict in doc_list.items():# Get the hook
+                        for pos, act in hook_dict.items():
+                            key = f"{batch}/{doc}/{hook}/{pos}"
+                            f.create_dataset(key, data = act, compression = compression, chunks = chunks_size)
+
+
+    def quantize_activations(self):
+        quantized_activations = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+        for batch, batch_dict in self.activations.items():# Get the batch
+            for doc, doc_list in batch_dict.items():# Get the document
+                for hook, hook_dict in doc_list.items():# Get the hook
+                    for pos, act in hook_dict.items():
+                        quantized_activations[batch][doc][hook][pos]= act.astype("float16")    
+        self.activations = quantized_activations
+
+
+
+    def load_activations(file_name, batch_index, doc_index, hook_name, pos):
+        activations = {}
+        with h5py.File(file_name,"r") as f:
+            group = f"{batch_index}/{doc_index}/{hook_name}/{pos}"
+            for tensor_
+
+
+
+
+
+# %%
+
+with open("final_dict.json", "r") as f:
+    location_dict = json.load(f)
+acts = ActivationsColector(model, tokens, 3, ["blocks.10.hook_attn_out","blocks.10.hook_resid_pre"],location_dict )
 
 
 
