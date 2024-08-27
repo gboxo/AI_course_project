@@ -34,14 +34,16 @@ class ActivationsColector:
     def __init__(self,
                  model:HookedSAETransformer,
                  dataset,
-                 ctx_len: int,
                  modules: List[str],
                  type_activations:  Literal["Activations", "Features", "Activations DE","Features DE"],
-                 location_dictionary: dict,
+                 activation_dir: str,
+                 location_dictionary_path: str,
                  cat_activations: bool = False,
                  quantize: bool = True,
                  average: bool = True,
-                 load: bool = True
+                 load: bool = True,
+                 version: Optional[int] = None,
+                 filename: Optional[str] = None,
 
                  ):
 
@@ -49,11 +51,12 @@ class ActivationsColector:
 
         self.dataset = DataLoader(dataset, batch_size = 4)
         self.model = model  
-        self.ctx_len = ctx_len
         self.modules = modules
         self.modules = modules 
+        self.activation_dir = activation_dir
         self.cat_activations = cat_activations
-        self.location_dictionary = location_dictionary
+        with open(location_dictionary_path+"/final_dict.json") as f:
+            self.location_dictionary = json.load(f)
         self.quantize = quantize
         self.average = average
         self.type_activations = type_activations
@@ -64,6 +67,11 @@ class ActivationsColector:
 
 
         if load:
+            assert filename is not None, "The filename must be provided"
+            assert version is not None, "The version must be provided"
+            self.filename = filename
+            self.version = version
+            self.versioned_dir = os.path.join(self.activation_dir,f"version_{self.version}")
             self.load_activations()
         else:
             self.activations = self.collect_activations()
@@ -78,7 +86,7 @@ class ActivationsColector:
         self.act_shapes = []
         if self.type_activations == "Activations":
             with torch.no_grad():
-                _,cache = model.run_with_cache(" ")
+                _,cache = self.model.run_with_cache(" ")
             for hook in self.modules:
                 assert isinstance(cache[hook], torch.Tensor), "The module must return a torch.Tensor"
                 if self.average:
@@ -105,7 +113,7 @@ class ActivationsColector:
             
 
             with torch.no_grad():
-                _,cache = model.run_with_saes(" ",saes = [self.saes_dict.values()])
+                _,cache = self.model.run_with_saes(" ",saes = [self.saes_dict.values()])
             for hook in self.modules:
                 assert isinstance(cache[hook+".hook_sae_acts_post"], torch.Tensor), "The module must return a torch.Tensor"
                 if self.average:
@@ -118,6 +126,7 @@ class ActivationsColector:
 
 
 
+    
             
     def get_cat_modules(self):
         assert self.cat_activations, "Only works if cat_activations is True"
@@ -126,6 +135,7 @@ class ActivationsColector:
         elif self.type_activations == "Features":
             self.simp_modules = "/".join([".".join([e.replace("blocks","").replace("hook","") for e in x.split(".")]+["hook_sae_acts_post"]) for x in self.modules])
             
+
 
 
 
@@ -147,7 +157,7 @@ class ActivationsColector:
             for doc, seq in enumerate(input_ids):# select the document
                 doc_list = batch_dict[str(doc)]
                 with torch.no_grad():
-                    _,cache = model.run_with_cache(seq)# Get all the activations (this needs to be changed)
+                    _,cache = self.model.run_with_cache(seq)# Get all the activations (this needs to be changed)
                     act_seq = {}
                     for hook in self.modules:
                         act = cache[hook+postfix]
@@ -180,9 +190,26 @@ class ActivationsColector:
                             key = f"{batch}/{doc}/{hook}/{pos}"
                             yield key, act
 
-        with h5py.File(f"activations_{self.type_activations}_{self.cat_activations}.h5", "w") as f:
+        self.filename = f"activations_{self.type_activations}_{self.cat_activations}.h5"
+        self.versioned_dir = self._create_versioned_dir(self.activation_dir)
+        full_dir = os.path.join(self.versioned_dir,self.filename)
+
+        with h5py.File(full_dir, "w") as f:
             for key, act in flatten_activations(self.activations):
                 f.create_dataset(key, data=act, compression=compression, chunks=chunks_size)
+
+
+
+    def _create_versioned_dir(self,base_dir) -> str:
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+        version = 0
+        while True:
+            versioned_dir = os.path.join(base_dir, f"version_{version}")
+            if not os.path.exists(versioned_dir):
+                os.makedirs(versioned_dir)
+                return versioned_dir
+            version += 1
 
 
     def quantize_activations(self):
@@ -195,15 +222,18 @@ class ActivationsColector:
         self.activations = quantized_activations
 
 
-    def load_activations(self, filename="activations.h5"):
+    def load_activations(self):
+
+        assert self.versioned_dir is not None, "The activations must be saved first"
         def nested_dict():
             """Helper function to create a nested defaultdict."""
             return defaultdict(nested_dict)
 
         # Initialize an empty nested dictionary
         activations = nested_dict()
+        full_dir = os.path.join(self.versioned_dir,self.filename)
 
-        with h5py.File(filename, "r") as f:
+        with h5py.File(full_dir, "r") as f:
             for batch in f.keys():
                 print(batch)
                 batch_group = f[batch]

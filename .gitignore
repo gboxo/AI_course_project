@@ -9,7 +9,7 @@ __pycache__/
 /checkpoints/
 /activations/
 /clusters/
-/position_dictionaries/
+/final_dicts/
 
 # Ignore virtual environment
 venv/
