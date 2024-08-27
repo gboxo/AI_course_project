@@ -1,0 +1,15 @@
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore large files directories
+/checkpoints/
+/activations/
+/clusters/
+/position_dictionaries/
+
+# Ignore virtual environment
+venv/

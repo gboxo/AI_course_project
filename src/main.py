@@ -3,7 +3,7 @@
 
 
 # %%
-from typing import List,Dict, Tuple,Any, Optional
+from typing import List,Dict, Tuple,Any, Optional, Literal
 import html
 import pandas as pd
 import json
@@ -22,6 +22,7 @@ from collections import defaultdict
 
 
 import h5py
+from transformers.pipelines.base import get_framework
 
 # %%
 
@@ -130,7 +131,7 @@ def get_correct_sequences(checkpoint_folder:"str", seq_leng:int):
 
 from sae_lens import SAE, SAEConfig
 import transformer_lens.utils as utils
-def attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg):
+def attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg,device):
     new_cfg = {
             "model_name":attn_sae_cfg['model_name'],
             "hook_head_index":attn_sae_cfg['act_name'],
@@ -158,7 +159,8 @@ def attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg):
 
 
 def get_attention_sae_dict(layers: Optional[List[Int]],
-                           all_layers: Optional[bool] =  False ):
+                           all_layers: Optional[bool] =  False,
+                           device = "cpu") -> Dict[str, SAE]:
 
 
     if all_layers:
@@ -187,7 +189,7 @@ def get_attention_sae_dict(layers: Optional[List[Int]],
     if all_layers:
         for auto_encoder_run in auto_encoder_runs:
             attn_sae_cfg = utils.download_file_from_hf(hf_repo_attn, f"{auto_encoder_run}_cfg.json")
-            cfg = attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg)
+            cfg = attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg,device)
             
             state_dict = utils.download_file_from_hf(hf_repo_attn, f"{auto_encoder_run}.pt", force_is_torch=True)
         
@@ -197,10 +199,10 @@ def get_attention_sae_dict(layers: Optional[List[Int]],
             
             hook_name_to_sae_attn[cfg['hook_name']] = hooked_sae
     else:
-        for layer in layers: # This works as long as the list is sorted
+        for layer in layers:
             auto_encoder_run = auto_encoder_runs[layer]
             attn_sae_cfg = utils.download_file_from_hf(hf_repo_attn, f"{auto_encoder_run}_cfg.json")
-            cfg = attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg)
+            cfg = attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg,device)
             
             state_dict = utils.download_file_from_hf(hf_repo_attn, f"{auto_encoder_run}.pt", force_is_torch=True)
         
@@ -227,7 +229,13 @@ def get_attention_sae_dict(layers: Optional[List[Int]],
     
 
 # %%
+"""
+TODO List:
+    - Add the option to get the activations from the last n tokens before the predictions
+    - Add the option to store attributions
 
+
+"""
 
 # Function to get the model activations for each sequence
 
@@ -240,12 +248,12 @@ class ActivationsColector:
                  dataset,
                  ctx_len: int,
                  modules: List[str],
-                 saes: List[SAE],
+                 type_activations:  Literal["Activations", "Features", "Activations DE","Features DE"],
                  location_dictionary: dict,
                  cat_activations: bool = False,
                  quantize: bool = True,
                  average: bool = True,
-                 load = True
+                 load: bool = True
 
                  ):
 
@@ -260,17 +268,86 @@ class ActivationsColector:
         self.location_dictionary = location_dictionary
         self.quantize = quantize
         self.average = average
+        self.type_activations = type_activations
+        
+
+
+        self.type_checking()
+
 
         if load:
             self.load_activations()
         else:
             self.activations = self.collect_activations()
             self.save_activations()
+        if self.cat_activations:
+            assert self.average == True, "If cat_activations they must be averaged"
+            self.get_cat_modules()
+
+
+
+    def type_checking(self):
+        self.act_shapes = []
+        if self.type_activations == "Activations":
+            with torch.no_grad():
+                _,cache = model.run_with_cache(" ")
+            for hook in self.modules:
+                assert isinstance(cache[hook], torch.Tensor), "The module must return a torch.Tensor"
+                if self.average:
+                    self.act_shapes.append(cache[hook].mean(dim = 1).shape)
+                
+                else:
+                    self.act_shapes.append(cache[hook].shape)
+
+                if self.cat_activations:
+                    size = sum([x[1] for x in self.act_shapes])
+                    self.act_shapes = [torch.empty( 1,size).shape]
+                        
+
+        if self.type_activations == "Features":
+            for module in self.modules:
+                assert "attn" in module, "For now only Attention SAEs are supported"
+
+            layers = []
+            for module in self.modules:
+                layers.append(int(module.split(".")[1].replace("L","")))
+
+
+            self.saes_dict = get_attention_sae_dict(layers,device = "cpu")
+            
+
+            with torch.no_grad():
+                _,cache = model.run_with_saes(" ",saes = [self.saes_dict.values()])
+            for hook in self.modules:
+                assert isinstance(cache[hook+".hook_sae_acts_post"], torch.Tensor), "The module must return a torch.Tensor"
+                if self.average:
+                    self.act_shapes.append(cache[hook+".hook_sae_acts_post"].mean(1).shape)
+                else:
+                    self.act_shapes.append(cache[hook+".hook_sae_acts_post"].shape)
+
+
+
+
+
+
+            
+    def get_cat_modules(self):
+        assert self.cat_activations, "Only works if cat_activations is True"
+        if self.type_activations == "Activations":
+            self.simp_modules = "/".join([".".join([e.replace("blocks","").replace("hook","") for e in x.split(".")]) for x in self.modules])
+        elif self.type_activations == "Features":
+            self.simp_modules = "/".join([".".join([e.replace("blocks","").replace("hook","") for e in x.split(".")]+["hook_sae_acts_post"]) for x in self.modules])
+            
+
 
 
 
     def collect_activations(self):
+
         activations = {}
+        postfix = ""
+        if self.type_activations == "Features":
+            postfix = ".hook_sae_acts_post"
 
         for i,d in tqdm(enumerate(self.dataset)):# Select the batch
 
@@ -285,7 +362,7 @@ class ActivationsColector:
                     _,cache = model.run_with_cache(seq)# Get all the activations (this needs to be changed)
                     act_seq = {}
                     for hook in self.modules:
-                        act = cache[hook]
+                        act = cache[hook+postfix]
                         act_hook_pos = {}
                         for tup in doc_list:
                             x = act[:,tup[0]:tup[1]+1]
@@ -293,6 +370,10 @@ class ActivationsColector:
                                 x = x.mean(dim = 1)
                             act_hook_pos[str(tup)]= x.to("cpu").numpy()# Add the activations for the correct predictions positions
                         act_seq[hook] = act_hook_pos # Add the activations for the module
+                if self.cat_activations:
+                    cat_act = torch.cat([v for v in act_seq.values()], dim = 1)
+                    
+                    act_seq[self.simp_modules] = cat_act.to("cpu").numpy()
                 batch_activations_dict[doc] = act_seq # Add the activations for the document
             activations[f"Batch {i}"] = batch_activations_dict
 
@@ -311,7 +392,7 @@ class ActivationsColector:
                             key = f"{batch}/{doc}/{hook}/{pos}"
                             yield key, act
 
-        with h5py.File("activations.h5", "w") as f:
+        with h5py.File(f"activations_{self.type_activations}_{self.cat_activations}.h5", "w") as f:
             for key, act in flatten_activations(self.activations):
                 f.create_dataset(key, data=act, compression=compression, chunks=chunks_size)
 
@@ -432,11 +513,11 @@ if __name__ == "__main__":
 
     tokens = tokenize_and_concatenate(data,tokenizer = model.tokenizer, max_length = 128)
 #create_visualization(tokens, "final_dict.json", 4)
-    filter_pred(tokens, 4)
-    get_correct_sequences("checkpoints", 3)
+    #filter_pred(tokens, 4)
+    #get_correct_sequences("checkpoints", 3)
     with open("final_dict.json", "r") as f:
         location_dict = json.load(f)
-    acts = ActivationsColector(model, tokens, 3, ["blocks.10.hook_attn_out","blocks.10.hook_resid_pre"],location_dict, cat_activations=False, quantize = True ,average = True, load = True)
+    acts = ActivationsColector(model, tokens, 4, ["blocks.4.hook_attn_out","blocks.5.hook_attn_out"],"Activations",location_dict, cat_activations=False, quantize = True ,average = True, load = True)
     clusters = SpectralClusteringAnalyzer(acts.activations)
     clusters.perform_clustering(3)
     clusters.save_cluster_labels("cluster_labels.h5")
