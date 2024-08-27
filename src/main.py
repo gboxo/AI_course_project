@@ -55,12 +55,12 @@ if __name__ == "__main__":
 
 
     pred_filt = PredictionFilter(model, batch_size = 4, checkpoint_dir = "../checkpoints",final_dicts_dir = "../final_dicts")
-    pred_filt.filter_predictions(tokens,save = True,strict = False,threshold = 0.1)
+    pred_filt.filter_predictions(tokens,save = True,strict = True,threshold = 0.1)
     pred_filt.get_correct_sequences(3)# The sequences of contiguous correct predictions must be at least 3 tokens long
     final_dicts_dir = pred_filt.final_dicts_dir_versioned
 
 
-    acts = ActivationsColector(model, tokens, ["blocks.4.hook_attn_out","blocks.5.hook_attn_out"],"Features","../activations/",final_dicts_dir, cat_activations=False, quantize = True ,average = True, load = False)
+    acts = ActivationsColector(model, tokens, ["blocks.4.attn.hook_z","blocks.5.attn.hook_z"],"Features","../activations/",final_dicts_dir, cat_activations=True, quantize = True ,average = True, load = False)
     clusters = SpectralClusteringAnalyzer(acts.activations, "../clusters/")
     clusters.perform_clustering(3)
     clusters.save_cluster_labels()

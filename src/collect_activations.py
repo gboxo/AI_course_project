@@ -44,6 +44,8 @@ class ActivationsColector:
                  load: bool = True,
                  version: Optional[int] = None,
                  filename: Optional[str] = None,
+                 device = "cpu"
+                 
 
                  ):
 
@@ -54,6 +56,7 @@ class ActivationsColector:
         self.modules = modules
         self.modules = modules 
         self.activation_dir = activation_dir
+        self.device = device
         self.cat_activations = cat_activations
         with open(location_dictionary_path+"/final_dict.json") as f:
             self.location_dictionary = json.load(f)
@@ -66,6 +69,9 @@ class ActivationsColector:
         self.type_checking()
 
 
+        if self.cat_activations:
+            assert self.average == True, "If cat_activations they must be averaged"
+            self.get_cat_modules()
         if load:
             assert filename is not None, "The filename must be provided"
             assert version is not None, "The version must be provided"
@@ -76,9 +82,6 @@ class ActivationsColector:
         else:
             self.activations = self.collect_activations()
             self.save_activations()
-        if self.cat_activations:
-            assert self.average == True, "If cat_activations they must be averaged"
-            self.get_cat_modules()
 
 
 
@@ -109,11 +112,11 @@ class ActivationsColector:
                 layers.append(int(module.split(".")[1].replace("L","")))
 
 
-            self.saes_dict = get_attention_sae_dict(layers,device = "cpu")
+            self.saes_dict = get_attention_sae_dict(layers,device = self.device)
             
 
             with torch.no_grad():
-                _,cache = self.model.run_with_saes(" ",saes = [self.saes_dict.values()])
+                _,cache = self.model.run_with_cache_with_saes(" ",saes = [sae  for _,sae in self.saes_dict.items() ])
             for hook in self.modules:
                 assert isinstance(cache[hook+".hook_sae_acts_post"], torch.Tensor), "The module must return a torch.Tensor"
                 if self.average:
@@ -156,22 +159,31 @@ class ActivationsColector:
             batch_dict = self.location_dictionary[f"Batch {i}"]
             for doc, seq in enumerate(input_ids):# select the document
                 doc_list = batch_dict[str(doc)]
-                with torch.no_grad():
-                    _,cache = self.model.run_with_cache(seq)# Get all the activations (this needs to be changed)
-                    act_seq = {}
-                    for hook in self.modules:
-                        act = cache[hook+postfix]
-                        act_hook_pos = {}
-                        for tup in doc_list:
-                            x = act[:,tup[0]:tup[1]+1]
-                            if self.average: 
-                                x = x.mean(dim = 1)
-                            act_hook_pos[str(tup)]= x.to("cpu").numpy()# Add the activations for the correct predictions positions
-                        act_seq[hook] = act_hook_pos # Add the activations for the module
+                if self.type_activations == "Activations":
+                    with torch.no_grad():
+                        _,cache = self.model.run_with_cache(seq)# Get all the activations (this needs to be changed)
+                elif self.type_activations == "Features":
+                    with torch.no_grad():
+                        _,cache = self.model.run_with_cache_with_saes(seq,saes = [sae  for _,sae in self.saes_dict.items() ])
+                act_seq = {}
+                for hook in self.modules:
+                    act = cache[hook+postfix]
+                    act_hook_pos = {}
+                    for tup in doc_list:
+                        x = act[:,tup[0]:tup[1]+1]
+                        if self.average: 
+                            x = x.mean(dim = 1)
+                        act_hook_pos[str(tup)]= x.to("cpu").numpy()# Add the activations for the correct predictions positions
+                    act_seq[hook] = act_hook_pos # Add the activations for the module
                 if self.cat_activations:
-                    cat_act = torch.cat([v for v in act_seq.values()], dim = 1)
+                    cat_act = defaultdict(list) 
+                    for hook,act_dict in act_seq.items():
+                        for pos,act in act_dict.items():
+                            cat_act[pos] += [act]
+                    cat_act = {pos:np.concatenate(act_list, axis = 1) for pos,act_list in cat_act.items()}
+                    act_seq = {}
                     
-                    act_seq[self.simp_modules] = cat_act.to("cpu").numpy()
+                    act_seq[self.simp_modules] = cat_act
                 batch_activations_dict[doc] = act_seq # Add the activations for the document
             activations[f"Batch {i}"] = batch_activations_dict
 
@@ -196,7 +208,9 @@ class ActivationsColector:
 
         with h5py.File(full_dir, "w") as f:
             for key, act in flatten_activations(self.activations):
-                f.create_dataset(key, data=act, compression=compression, chunks=chunks_size)
+                group = f.require_group("/".join(key.split("/")[:-1]))
+                dataset_name = key.split("/")[-1]
+                group.create_dataset(dataset_name, data=act, compression=compression, chunks=chunks_size)
 
 
 

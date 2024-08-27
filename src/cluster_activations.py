@@ -40,7 +40,12 @@ class SpectralClusteringAnalyzer:
             for doc, doc_list in batch_dict.items():
                 for hook, hook_dict in doc_list.items():
                     for pos, act in hook_dict.items():
-                        all_activations.append(act.flatten())
+                        if len(act.shape) == 3:
+                            act = act.flatten()
+                            all_activations.append(act)
+                        elif len(act.shape) == 2:
+                            act = act.flatten()
+                            all_activations.append(act)
         return np.array(all_activations)
 
     def _create_versioned_dir(self,base_dir) -> str:
