@@ -13,13 +13,6 @@ from cluster_activations import SpectralClusteringAnalyzer
 
 
 
-"""
-TODO List:
-    - Add the option to get the activations from the last n tokens before the predictions
-    - Add the option to store attributions
-
-
-"""
 
 
 
