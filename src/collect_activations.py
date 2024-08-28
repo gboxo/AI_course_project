@@ -134,9 +134,9 @@ class ActivationsColector:
     def get_cat_modules(self):
         assert self.cat_activations, "Only works if cat_activations is True"
         if self.type_activations == "Activations":
-            self.simp_modules = "/".join([".".join([e.replace("blocks","").replace("hook","") for e in x.split(".")]) for x in self.modules])
+            self.simp_modules = "-".join(["".join([e.replace("blocks","").replace("hook","") for e in x.split(".")]) for x in self.modules])
         elif self.type_activations == "Features":
-            self.simp_modules = "/".join([".".join([e.replace("blocks","").replace("hook","") for e in x.split(".")]+["hook_sae_acts_post"]) for x in self.modules])
+            self.simp_modules = "-".join(["".join([e.replace("blocks","").replace("hook","") for e in x.split(".")]+["sae"]) for x in self.modules])
             
 
 

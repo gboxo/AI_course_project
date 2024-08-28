@@ -1,29 +1,15 @@
-# AI Safety Course Project
 
 
 
-import json
 from sae_lens import SAE, SAEConfig, HookedSAETransformer
-from matplotlib import pyplot as plt
-import os
 import torch
-import numpy as np
 from transformer_lens.utils import tokenize_and_concatenate
 from datasets import load_dataset
-from torch.utils.data import DataLoader, dataset
-from tqdm import tqdm
-from collections import defaultdict
 
 
 from filter_tokens import PredictionFilter
 from collect_activations import ActivationsColector
 from cluster_activations import SpectralClusteringAnalyzer
-
-
-
-
-
-
 
 
 
@@ -35,12 +21,6 @@ TODO List:
 
 """
 
-# Function to get the model activations for each sequence
-
-
-
-
-
 
 
 
@@ -48,9 +28,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = HookedSAETransformer.from_pretrained("gpt2", device = device)
     data = load_dataset("/home/gerard/MI/pile-10k/", split = "train")
-    tokens = tokenize_and_concatenate(data,tokenizer = model.tokenizer, max_length = 128)
-
-
+    tokens = tokenize_and_concatenate(data, model.tokenizer, max_length=128)
     # ======== Get the predictions and the tokens =========
 
 
@@ -65,17 +43,5 @@ if __name__ == "__main__":
     clusters.perform_clustering(3)
     clusters.save_cluster_labels()
 
-
-
-
-
-
-
-
-
-
-
-
-    
 
 
