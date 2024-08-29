@@ -19,13 +19,50 @@ from torch.utils.data import DataLoader, dataset
 from tqdm import tqdm
 from collections import defaultdict
 from sae_utils import get_attention_sae_dict
-
-
+from transformer_lens.ActivationCache import ActivationCache
+from typing import List,Dict, Tuple,Any, Optional, Literal
+from jaxtyping import Int, Float 
+from torch import Tensor
 import h5py
 
 
 
 # Function to get the model activations for each sequence
+torch.set_grad_enabled(True)
+filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)
+def get_cache_fwd_and_bwd(model, tokens, metric,pos:Tensor,answer_tokens:Tensor):
+    model.reset_hooks()
+    cache = {}
+    def forward_cache_hook(act, hook):
+        cache[hook.name] = act.detach()
+    model.add_hook(filter_sae_acts, forward_cache_hook, "fwd")
+
+    grad_cache = {}
+    def backward_cache_hook(act, hook):
+        grad_cache[hook.name] = act.detach()
+    model.add_hook(filter_sae_acts, backward_cache_hook, "bwd")
+    gradients = torch.zeros_like(tokens)
+    gradients[0,pos] = 1
+    logits = model(tokens)
+
+    value = metric(model,logits, pos,answer_tokens)
+    value.backward(gradients)
+    model.reset_hooks()
+    return value.item(), ActivationCache(cache, model), ActivationCache(grad_cache, model)
+
+
+def neg_log_pron(model,logits, pos,answer_tokens):
+    assert len(pos.shape) == 2, "The positions must be a 2 dim tensor (batch position)"
+    assert len(answer_tokens.shape) == 2, "The answer tokens must be a 2 dim tensor (batch correct tokens)"
+    assert len(logits.shape) == 3, "The logits must be a 3 dim tensor (batch position vocab)"
+    
+    pos = pos.unsqueeze(-1).expand(-1, -1, model.cfg.d_vocab)
+    log_probs = logits.log_softmax(logits, dim=-1)
+    gather_rows  = log_probs.gather(1, pos)
+    log_probs = gather_rows.squeeze(0).gather(-1,answer_tokens)
+    return -log_probs # Shape (batch, correct tokens)
+
+
 
 
 from transformer_lens.hook_points import HookPoint
@@ -103,7 +140,7 @@ class ActivationsColector:
                     self.act_shapes = [torch.empty( 1,size).shape]
                         
 
-        if self.type_activations == "Features":
+        elif self.type_activations == "Features":
             for module in self.modules:
                 assert "attn" in module, "For now only Attention SAEs are supported"
 
@@ -123,7 +160,10 @@ class ActivationsColector:
                     self.act_shapes.append(cache[hook+".hook_sae_acts_post"].mean(1).shape)
                 else:
                     self.act_shapes.append(cache[hook+".hook_sae_acts_post"].shape)
+        elif self.type_activations == "Features DE":
 
+
+        
 
 
 

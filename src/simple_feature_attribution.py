@@ -37,7 +37,7 @@ The process is simple select a feature from a layer, sae and perform attribution
 # Function to get the model activations for each sequence
 filter_sae_acts = lambda name: "hook_sae_acts_post" in name 
 torch.set_grad_enabled(True)
-def get_cache_fwd_and_bwd(model, tokens, metric,pos:Tensor,answer_tokens:Tensor):
+def get_cache_fwd_and_bwd(model, tokens, metric,feature_index):
     model.reset_hooks()
     cache = {}
     def forward_cache_hook(act, hook):
@@ -55,7 +55,6 @@ def get_cache_fwd_and_bwd(model, tokens, metric,pos:Tensor,answer_tokens:Tensor)
 
     
     logits = model(tokens)
-    feature_index = 11842
     downstream = cache["blocks.6.attn.hook_z.hook_sae_acts_post"]
 
     gradients = torch.zeros_like(downstream)
@@ -88,6 +87,6 @@ if __name__ == "__main__":
     for name, sae in sae_dict.items():
         sae.use_error_term = True
         model.add_sae(sae)
-    value, fwd_cache, bwd_cache = get_cache_fwd_and_bwd(model, tokens, metric_fn,pos,answer_tokens)
+    value, fwd_cache, bwd_cache = get_cache_fwd_and_bwd(model, tokens, metric_fn,feature_index = 11842 )
 
 

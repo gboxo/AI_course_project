@@ -9,7 +9,7 @@ from datasets import load_dataset
 
 from filter_tokens import PredictionFilter
 from collect_activations import ActivationsColector
-from cluster_activations import SpectralClusteringAnalyzer
+from cluster_activations import  ClusteringAnalyzer
 
 
 
@@ -32,8 +32,8 @@ if __name__ == "__main__":
 
 
     acts = ActivationsColector(model, tokens, ["blocks.4.attn.hook_z","blocks.5.attn.hook_z"],"Features","../activations/",final_dicts_dir, cat_activations=True, quantize = True ,average = True, load = False)
-    clusters = SpectralClusteringAnalyzer(acts.activations, "../clusters/")
-    clusters.perform_clustering(3)
+    clusters = ClusteringAnalyzer(acts.activations, "../clusters/")
+    clusters.perform_clustering(3, method = "kmeans")
     clusters.save_cluster_labels()
 
 
