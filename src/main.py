@@ -1,6 +1,3 @@
-
-
-
 from sae_lens import SAE, SAEConfig, HookedSAETransformer
 import torch
 from transformer_lens.utils import tokenize_and_concatenate
@@ -25,7 +22,7 @@ if __name__ == "__main__":
     # ======== Get the predictions and the tokens =========
 
 
-    pred_filt = PredictionFilter(model, batch_size = 4, checkpoint_dir = "../checkpoints",final_dicts_dir = "../final_dicts",device = device, batches_to_process = 10)
+    pred_filt = PredictionFilter(model, batch_size = 32, checkpoint_dir = "../checkpoints",final_dicts_dir = "../final_dicts",device = device, batches_to_process = 10)
     pred_filt.filter_predictions(tokens,save = True,strict = True,threshold = 0.1)
     pred_filt.get_correct_sequences(3)# The sequences of contiguous correct predictions must be at least 3 tokens long
     final_dicts_dir = pred_filt.final_dicts_dir_versioned

@@ -17,7 +17,8 @@ class PredictionFilter:
         self.checkpoint_dir_versioned = self._create_versioned_dir(self.checkpoint_dir)
         self.final_dicts_dir = final_dicts_dir
         self.final_dicts_dir_versioned = self._create_versioned_dir(self.final_dicts_dir)
-        self.batches_to_process = batches_to_process
+        self.num_batches_to_process = batches_to_process
+
 
     def _create_versioned_dir(self,base_dir) -> str:
         if not os.path.exists(base_dir):
@@ -33,6 +34,7 @@ class PredictionFilter:
 
 
     def filter_predictions(self, token_dataset, save: bool = True, strict: bool = False, threshold: float = 0.1):
+        self.num_batches_to_process = self.num_batches_to_process if self.num_batches_to_process is not None else len(token_dataset)//self.batch_size
         if not strict:
             assert threshold is not None, "Threshold must be provided if strict is False"
 
@@ -40,7 +42,7 @@ class PredictionFilter:
         check_point_dict = defaultdict(dict)
 
         for i, d in tqdm(enumerate(dataset)):
-            if i >= self.batches_to_process:  # Limiting to 10 batches for demonstration
+            if i >= self.num_batches_to_process:  # Limiting to 10 batches for demonstration
                 break
             input_ids = d['tokens']
             with torch.no_grad():
