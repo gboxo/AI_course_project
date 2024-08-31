@@ -189,9 +189,7 @@ class ActivationsColector:
     def collect_activations(self):
 
         activations = {}
-        postfix = ""
-        if self.type_activations == "Features":
-            postfix = ".hook_sae_acts_post"
+        postfix = ".hook_sae_acts_post" if self.type_activations == "Features" else ""
 
         for i,d in tqdm(enumerate(self.dataset)):# Select the batch
 
@@ -200,35 +198,39 @@ class ActivationsColector:
             if f"Batch {i}" not in self.location_dictionary:
                 break
             batch_dict = self.location_dictionary[f"Batch {i}"]
-            for doc, seq in zip(batch_dict.keys(),input_ids):# select the document
-                doc_list = batch_dict[str(doc)]
+            sequences = [(doc,seq) for doc,seq in zip(batch_dict.keys(),input_ids)]
+            doc_lists = {doc: batch_dict[str(doc)] for doc,_ in sequences}
+            with torch.no_grad():
                 if self.type_activations == "Activations":
-                    with torch.no_grad():
-                        _,cache = self.model.run_with_cache(seq)# Get all the activations (this needs to be changed)
+                    _,cache = self.model.run_with_cache(input_ids)
                 elif self.type_activations == "Features":
                     filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)
-                    with torch.no_grad():
-                        _,cache = self.model.run_with_cache_with_saes(seq,saes = [sae  for _,sae in self.saes_dict.items() ], names_filter = filter_sae_acts)
+                    _,cache = self.model.run_with_cache_with_saes(input_ids,saes = [sae  for _,sae in self.saes_dict.items() ], names_filter = filter_sae_acts)
+
+
+            for hook in self.modules:
+                act = cache[hook+postfix]
                 act_seq = {}
-                for hook in self.modules:
-                    act = cache[hook+postfix]
+                for doc, doc_list in doc_lists.items():
                     act_hook_pos = {}
                     for tup in doc_list:
                         x = act[:,tup[0]:tup[1]+1]
                         if self.average: 
                             x = x.mean(dim = 1)
-                        act_hook_pos[str(tup)]= x.to("cpu").numpy()# Add the activations for the correct predictions positions
-                    act_seq[hook] = act_hook_pos # Add the activations for the module
+                        act_hook_pos[str(tup)]= x.cpu().numpy()
+                    act_seq[doc] = act_hook_pos
+                # Concatenate activations if requested.
                 if self.cat_activations:
-                    cat_act = defaultdict(list) 
-                    for hook,act_dict in act_seq.items():
-                        for pos,act in act_dict.items():
-                            cat_act[pos] += [act]
-                    cat_act = {pos:np.concatenate(act_list, axis = 1) for pos,act_list in cat_act.items()}
-                    act_seq = {}
-                    
-                    act_seq[self.simp_modules] = cat_act
-                batch_activations_dict[doc] = act_seq # Add the activations for the document
+                    cat_act = defaultdict(list)
+                    for hook, act_dict in act_seq.items():
+                        for pos, act in act_dict.items():
+                            cat_act[pos].append(act)
+                    cat_act = {pos: np.concatenate(act_list, axis=1) for pos, act_list in cat_act.items()}
+                    act_seq = {self.simp_modules: cat_act}  # Use only concatenated activations.
+
+                batch_activations_dict.update(act_seq)  # Update the batch dictionary with collected activations.
+
+
             activations[f"Batch {i}"] = batch_activations_dict
 
         return activations

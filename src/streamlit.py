@@ -26,7 +26,7 @@ import h5py
 
 def create_streamlit_visualization(token_dataset, model, batch_size=256):
     # load final_dict from json file
-    with open("final_dict.json", "r") as f:
+    with open("../final_dicts/version_3/final_dict.json", "r") as f:
         final_dict = json.load(f)
 
     # create a dataloader for the token dataset

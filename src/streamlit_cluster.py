@@ -27,9 +27,9 @@ import h5py
 
 
 
-def create_streamlit_visualization(token_dataset, model, cluster_keys, cluster_labels, batch_size=4):
+def create_streamlit_visualization(token_dataset, model, cluster_keys, cluster_labels, batch_size=256):
     # Load final_dict from json file
-    with open("../final_dicts/version_0/final_dict.json", "r") as f:
+    with open("../final_dicts/version_2/final_dict.json", "r") as f:
         final_dict = json.load(f)
 
     # Create a dataloader for the token dataset
@@ -148,7 +148,7 @@ tokens = tokenize_and_concatenate(data, tokenizer=model.tokenizer, max_length=12
 
 cluster_keys = []
 cluster_labels = []
-with h5py.File("../clusters/version_0/cluster_labels.h5", "r") as f:
+with h5py.File("../clusters/version_2/cluster_labels.h5", "r") as f:
     for batch in f.keys():
         batch_group = f[batch]
         for doc in batch_group.keys():
