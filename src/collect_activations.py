@@ -81,14 +81,15 @@ class ActivationsColector:
                  load: bool = True,
                  version: Optional[int] = None,
                  filename: Optional[str] = None,
-                 device = "cpu"
+                 device: str = "cpu",
+                 batch_size: int = 4,
                  
 
                  ):
 
 
 
-        self.dataset = DataLoader(dataset, batch_size = 4)
+        self.dataset = DataLoader(dataset, batch_size = batch_size)
         self.model = model  
         self.modules = modules
         self.modules = modules 
@@ -152,8 +153,9 @@ class ActivationsColector:
             self.saes_dict = get_attention_sae_dict(layers,device = self.device)
             
 
+            filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)
             with torch.no_grad():
-                _,cache = self.model.run_with_cache_with_saes(" ",saes = [sae  for _,sae in self.saes_dict.items() ])
+                _,cache = self.model.run_with_cache_with_saes(" ",saes = [sae  for _,sae in self.saes_dict.items() ], filter_name = filter_sae_acts)
             for hook in self.modules:
                 assert isinstance(cache[hook+".hook_sae_acts_post"], torch.Tensor), "The module must return a torch.Tensor"
                 if self.average:
@@ -161,6 +163,7 @@ class ActivationsColector:
                 else:
                     self.act_shapes.append(cache[hook+".hook_sae_acts_post"].shape)
         elif self.type_activations == "Features DE":
+            pass
 
 
         
@@ -203,8 +206,9 @@ class ActivationsColector:
                     with torch.no_grad():
                         _,cache = self.model.run_with_cache(seq)# Get all the activations (this needs to be changed)
                 elif self.type_activations == "Features":
+                    filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)
                     with torch.no_grad():
-                        _,cache = self.model.run_with_cache_with_saes(seq,saes = [sae  for _,sae in self.saes_dict.items() ])
+                        _,cache = self.model.run_with_cache_with_saes(seq,saes = [sae  for _,sae in self.saes_dict.items() ], filter_name = filter_sae_acts)
                 act_seq = {}
                 for hook in self.modules:
                     act = cache[hook+postfix]

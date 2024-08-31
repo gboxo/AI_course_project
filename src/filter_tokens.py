@@ -10,13 +10,14 @@ from tqdm import tqdm
 from collections import defaultdict
 
 class PredictionFilter:
-    def __init__(self, model: HookedSAETransformer, batch_size: int, checkpoint_dir: str = "../checkpoints",final_dicts_dir: str = "../final_dicts"):
+    def __init__(self, model: HookedSAETransformer, batch_size: int, checkpoint_dir: str = "../checkpoints",final_dicts_dir: str = "../final_dicts",device: str = "cuda:0",batches_to_process: int = 10):
         self.model = model
         self.batch_size = batch_size
         self.checkpoint_dir = checkpoint_dir
         self.checkpoint_dir_versioned = self._create_versioned_dir(self.checkpoint_dir)
         self.final_dicts_dir = final_dicts_dir
         self.final_dicts_dir_versioned = self._create_versioned_dir(self.final_dicts_dir)
+        self.batches_to_process = batches_to_process
 
     def _create_versioned_dir(self,base_dir) -> str:
         if not os.path.exists(base_dir):
@@ -39,7 +40,7 @@ class PredictionFilter:
         check_point_dict = defaultdict(dict)
 
         for i, d in tqdm(enumerate(dataset)):
-            if i == 10:  # Limiting to 10 batches for demonstration
+            if i >= self.batches_to_process:  # Limiting to 10 batches for demonstration
                 break
             input_ids = d['tokens']
             with torch.no_grad():
