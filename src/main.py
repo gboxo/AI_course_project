@@ -17,21 +17,21 @@ from cluster_activations import  ClusteringAnalyzer
 if __name__ == "__main__":
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = HookedSAETransformer.from_pretrained("gpt2", device = device)
-    data = load_dataset("/home/gerard/MI/pile-10k/", split = "train")
+    data = load_dataset("NeelNanda/pile-10k", split = "train")
     tokens = tokenize_and_concatenate(data, model.tokenizer, max_length=128)
     # ======== Get the predictions and the tokens =========
 
 
-    pred_filt = PredictionFilter(model, batch_size = 32, checkpoint_dir = "../checkpoints",final_dicts_dir = "../final_dicts",device = device, batches_to_process = 10)
-    pred_filt.filter_predictions(tokens,save = True,strict = True,threshold = 0.1)
+    pred_filt = PredictionFilter(model, batch_size = 256, checkpoint_dir = "../checkpoints",final_dicts_dir = "../final_dicts",device = device, batches_to_process = None)
+    pred_filt.filter_predictions(tokens,save = True,strict = False,threshold = 0.1)
     pred_filt.get_correct_sequences(3)# The sequences of contiguous correct predictions must be at least 3 tokens long
     final_dicts_dir = pred_filt.final_dicts_dir_versioned
-    #final_dicts_dir = "../final_dicts/version_2"
+    final_dicts_dir = "../final_dicts/version_4"
 
 
-    acts = ActivationsColector(model, tokens, ["blocks.2.attn.hook_z","blocks.5.attn.hook_z"],"Features","../activations/",final_dicts_dir, cat_activations=True, quantize = True ,average = True, load = False, device = device)
+    acts = ActivationsColector(model, tokens, ["blocks.2.attn.hook_z","blocks.5.attn.hook_z",],"Features","../activations/",final_dicts_dir, cat_activations=True, quantize = True ,average = True, load = False, device = device)
     clusters = ClusteringAnalyzer(acts.activations, "../clusters/")
-    clusters.perform_clustering(3, method = "kmeans")
+    clusters.perform_clustering(100, method = "kmeans")
     clusters.save_cluster_labels()
 
 

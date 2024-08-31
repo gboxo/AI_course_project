@@ -45,11 +45,12 @@ class PredictionFilter:
             if i >= self.num_batches_to_process:  # Limiting to 10 batches for demonstration
                 break
             input_ids = d['tokens']
+            input_ids.to("cuda:0")
             with torch.no_grad():
                 logits = self.model(input_ids)
 
             logits = logits[:, :-1].contiguous()
-            target_ids = input_ids[:, 1:].contiguous()
+            target_ids = input_ids[:, 1:].contiguous().to("cuda:0")
             if strict:
                 argmax_pred = torch.argmax(logits, dim=-1)
                 pred = (argmax_pred == target_ids).float()

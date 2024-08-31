@@ -82,7 +82,7 @@ class ActivationsColector:
                  version: Optional[int] = None,
                  filename: Optional[str] = None,
                  device: str = "cpu",
-                 batch_size: int = 4,
+                 batch_size: int = 256,
                  
 
                  ):
@@ -155,7 +155,7 @@ class ActivationsColector:
 
             filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)
             with torch.no_grad():
-                _,cache = self.model.run_with_cache_with_saes(" ",saes = [sae  for _,sae in self.saes_dict.items() ], filter_name = filter_sae_acts)
+                _,cache = self.model.run_with_cache_with_saes(" ",saes = [sae  for _,sae in self.saes_dict.items() ], names_filter = filter_sae_acts)
             for hook in self.modules:
                 assert isinstance(cache[hook+".hook_sae_acts_post"], torch.Tensor), "The module must return a torch.Tensor"
                 if self.average:
@@ -200,7 +200,7 @@ class ActivationsColector:
             if f"Batch {i}" not in self.location_dictionary:
                 break
             batch_dict = self.location_dictionary[f"Batch {i}"]
-            for doc, seq in enumerate(input_ids):# select the document
+            for doc, seq in zip(batch_dict.keys(),input_ids):# select the document
                 doc_list = batch_dict[str(doc)]
                 if self.type_activations == "Activations":
                     with torch.no_grad():
@@ -208,7 +208,7 @@ class ActivationsColector:
                 elif self.type_activations == "Features":
                     filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)
                     with torch.no_grad():
-                        _,cache = self.model.run_with_cache_with_saes(seq,saes = [sae  for _,sae in self.saes_dict.items() ], filter_name = filter_sae_acts)
+                        _,cache = self.model.run_with_cache_with_saes(seq,saes = [sae  for _,sae in self.saes_dict.items() ], names_filter = filter_sae_acts)
                 act_seq = {}
                 for hook in self.modules:
                     act = cache[hook+postfix]
