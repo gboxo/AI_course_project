@@ -3,21 +3,20 @@ import torch
 import json
 from tqdm import tqdm
 from torch.utils.data import dataloader
-
-from typing import list,dict, tuple,any, optional
+from typing import List,Optional
 import html
 import pandas as pd
 import json
 import os
-from sae_lens import sae, saeconfig, hookedsaetransformer
+from sae_lens import SAE, SAEConfig, HookedSAETransformer
 from matplotlib import pyplot as plt
 import torch
 import numpy as np
 import torch.nn as nn
-from jaxtyping import int, float 
+from jaxtyping import Int, Float 
 from transformer_lens.utils import tokenize_and_concatenate
 from datasets import load_dataset
-from torch.utils.data import dataloader, dataset
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from collections import defaultdict
 
@@ -25,13 +24,13 @@ from collections import defaultdict
 import h5py
 
 
-def create_streamlit_visualization(token_dataset, model, batch_size=4):
+def create_streamlit_visualization(token_dataset, model, batch_size=256):
     # load final_dict from json file
     with open("final_dict.json", "r") as f:
         final_dict = json.load(f)
 
     # create a dataloader for the token dataset
-    dataset = dataloader(token_dataset, batch_size=batch_size)
+    dataset = DataLoader(token_dataset, batch_size=batch_size)
 
     # streamlit title
     st.title("token prediction visualization")
@@ -56,7 +55,7 @@ def create_streamlit_visualization(token_dataset, model, batch_size=4):
         }
         </style>
         """,
-        unsafe_allow_html=true
+        unsafe_allow_html=True
     )
 
     # sidebar for navigation
@@ -68,21 +67,21 @@ def create_streamlit_visualization(token_dataset, model, batch_size=4):
     batch_index = int(selected_batch.split(" ")[1])
 
     # check if the current batch is in final_dict
-    if f"batch {batch_index}" not in final_dict:
+    if f"Batch {batch_index}" not in final_dict:
         st.warning("this batch does not exist in the final dictionary.")
         return
 
-    batch_dict = final_dict[f"batch {batch_index}"]
+    batch_dict = final_dict[f"Batch {batch_index}"]
     input_ids = dataset.dataset[batch_index*batch_size:(batch_index+1)*batch_size]['tokens']
 
-    st.header(f"batch {batch_index}")
+    st.header(f"Batch {batch_index}")
     for doc, seq in enumerate(input_ids):
         doc_list = batch_dict.get(str(doc), [])
         if not doc_list:
             continue
         indices = torch.zeros(len(seq))
         str_tokens = [model.to_string(ind) for ind in seq]
-        if isinstance(seq, torch.tensor) and seq.dim() == 0:
+        if isinstance(seq, torch.Tensor) and seq.dim() == 0:
             st.warning(f"document {doc} has no tokens.")
             continue  # skip this document if seq is a scalar tensor
 
@@ -111,7 +110,7 @@ def create_streamlit_visualization(token_dataset, model, batch_size=4):
             else:
                 token_display.append(f'<span class="token">{token_text}</span>')
 
-        st.markdown(" ".join(token_display), unsafe_allow_html=true)
+        st.markdown(" ".join(token_display), unsafe_allow_html=True)
 
         # display the original text below the tokens
         original_text = model.to_string(seq[1:])
@@ -127,18 +126,15 @@ def create_streamlit_visualization(token_dataset, model, batch_size=4):
 
 
 
+  
 
 
 
-
-
-
-
-model = hookedsaetransformer.from_pretrained("gpt2")
-data = load_dataset("/home/gerard/mi/pile-10k/", split = "train")
+model = HookedSAETransformer.from_pretrained("gpt2")
+data = load_dataset("/home/gerard/MI/pile-10k/", split = "train")
 
 tokens = tokenize_and_concatenate(data,tokenizer = model.tokenizer, max_length = 128)
-create_streamlit_visualization(tokens, model, batch_size=4)
+create_streamlit_visualization(tokens, model, batch_size=256)
 
 
 
