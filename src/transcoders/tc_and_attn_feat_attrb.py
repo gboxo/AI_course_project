@@ -106,6 +106,7 @@ def apply_and_run(
     tc_activations: dict[str, TcReconstructionCache] = {}
     sae_activations: dict[str, SaeReconstructionCache] = {}
     model_activations:  dict[str, torch.Tensor] = {}
+    threshold = 0.1
 
     cache_in = {}
     def caching_hook_in(acts, hook):
