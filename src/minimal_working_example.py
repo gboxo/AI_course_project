@@ -10,30 +10,8 @@ import numpy as np
 import seaborn as sns
 from sae_utils import get_attention_sae_dict
 from html_visualization import create_visualization_loss, create_visualization_plotly
+import einops
 
-"""
-Mullti Token Circuits
-
-What are multlitoken circuits in the context of max  activating dataset examples for a given attention features.
-
-
-It's very usual that a given feature (attention or otherwise) is active in several tokens in a prompt, and that the (DFA destination token) is outside those tokens in which the feature is active.
-
-A common approach is to either average the activations over the token positions or just use the first token in which the feature is activates.
-
-
-In this work this apporach changes and the focus is draw to all the multiple tokens in which the feature is active not just the first.
-
-
-To do so  we have several approaches, but from first principles the best approach seems to iterate over the token positions and for each positions search for shallow circuits, as the position index progresses inside the fewe tokens where the feature is active, we will reference circuit formations from the previous tokens.
-
-
-This introduces a tradeoff because a very similar thing can be naively done by just attributing from rhs tokens, the problem is that this attribution is not faithful at all with the causal attention mask and AR nature of language models.
-
-
-
-
-"""
 
 # %%
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -69,16 +47,56 @@ active_tensor = [(act != 0) for act in acts ]
 
 
 # get the per token loss for the prompts in which the feature is acive
+"""
 all_losses = []
 with torch.no_grad():
     for tok in tok_is_active:
         per_token_loss = model(tok, loss_per_token = True, return_type = "loss")
         all_losses.append(per_token_loss)
+"""
+
+# %%
+
+#create_visualization_plotly(model,tok_is_active,all_losses, active_tensor)
+
+
 
 
 # %%
 
-create_visualization_plotly(model,tok_is_active,all_losses, active_tensor)
+# For every one of the prompts in which the feature fires get the first position in which the fature fires and perform logit lens
+
+all_toks = model.to_tokens(strings, prepend_bos = False)
+with  torch.no_grad():
+    _,cache = model.run_with_cache_with_saes(all_toks,saes = [sae  for _,sae in sae_dict.items() ], stop_at_layer = 6)
+
+
+# Get the first position in which the feature is active for each prompt
+
+
+
+
+accumulated_residual, labels = cache.accumulated_resid(
+        layer = 5,incl_mid=False,  return_labels=True,apply_ln = False)
+
+
+first_pos = torch.argmax((cache["blocks.5.attn.hook_z.hook_sae_acts_post"][:,:,148]!=0).to(torch.int), dim =  -1)
+
+results = []
+for i,pos in enumerate(first_pos):
+    x = accumulated_residual[:,i,pos,:]
+    results.append(x)
+
+result = torch.stack(results)[:,:5,:]
+feat_dir = sae_dict["blocks.5.attn.hook_z"].W_enc.detach()[:,148]
+
+feature_attribution = einops.einsum(result,feat_dir, "batch layer d_model, d_model -> batch layer " )
+
+
+
+sns.boxplot(feature_attribution)
+plt.ylim(0,10)
+plt.show()
 
 
 
