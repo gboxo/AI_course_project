@@ -22,7 +22,7 @@ if __name__ == "__main__":
     model = HookedTransformer.from_pretrained('gpt2')
 
 
-    transcoder_template = "/mnt/myssd/gpt-2-small-transcoders/final_sparse_autoencoder_gpt2-small_blocks.{}.ln2.hook_normalized_24576"
+    transcoder_template = "/media/workspace/gpt-2-small-transcoders/final_sparse_autoencoder_gpt2-small_blocks.{}.ln2.hook_normalized_24576"
     transcoders = []
     sparsities = []
     for i in range(12):
@@ -47,21 +47,20 @@ if __name__ == "__main__":
 
        tc_error = (acts_out - tc_out).detach().clone()
         
-       return tc_out
+       return tc_out*0
        #return tc_out+tc_error
 
     fwd_hooks = []
 
     for hook_point,tc in tcs_dict.items():
         hook_point_in = tc.cfg.hook_point
-        print(hook_point)
-        print(hook_point_in)
         fwd_hooks.append( (hook_point_in, caching_hook_in))
         fwd_hooks.append((hook_point, partial(reconstruct_hook, hook_in = hook_point_in)))
 
     with model.hooks(fwd_hooks = fwd_hooks):
         input = "Hello, my name is"
-        model_output = model(input)
+        model_output,cache  = model.run_with_cache(input)
+        print(cache["blocks.11.hook_resid_post"].sum())
 
 
 

@@ -1,4 +1,4 @@
-
+from transformer_lens import HookedTransformer
 from sae_lens import SAE, SAEConfig, HookedSAETransformer
 from matplotlib import pyplot as plt
 import numpy as np
@@ -23,7 +23,7 @@ from torch.distributions.categorical import Categorical
 from transformer_lens.hook_points import HookedRootModule, HookPoint
 import os
 from sae_training.sparse_autoencoder import SparseAutoencoder
-from typing import Any,Literal, NamedTuple, Callable
+from typing import Any,Literal, NamedTuple, Callable, Tuple, Union
 from transformer_lens.hook_points import HookPoint
 
 torch.set_grad_enabled(False)
@@ -91,7 +91,7 @@ class ApplyAndRunOutput:
             cache_sae.sae_error.grad = None
 
 def apply_and_run(
-        model: HookedSAETransformer,
+        model,
         tcs_dict: dict[str,SparseAutoencoder],
         saes_dict: dict[str,SAE],
         input:Any,
@@ -108,36 +108,42 @@ def apply_and_run(
     model_activations:  dict[str, torch.Tensor] = {}
     threshold = 0.1
 
-    cache_in = {}
-    def caching_hook_in(acts, hook):
-        cache_in[hook.name] = acts.detach().clone()
-
-    def reconstruct_hook(acts_out,hook:HookPoint, hook_in):
-       tc = tcs_dict[hook.name]
-       tc_in = cache_in[hook_in]
-       tc_out, feature_acts, _,_,_,_ = tc(tc_in)
-
-       tc_error = (acts_out - tc_out).detach().clone()
-        
-       if track_grads:
-            track_grad(tc_error)
-            track_grad(tc_out)
-            track_grad(feature_acts)
-            track_grad(tc_in)
-
-       tc_activations[hook.name] = TcReconstructionCache(
-                tc_in = tc_in,
-                feature_acts = feature_acts,
-                tc_out = tc_out,
-                tc_error = tc_error
-
-                )
-       if include_error_term:
-           return tc_out + tc_error
-       else:
-           return tc_out
 
 
+
+    def get_fwd_hooks(sae: SparseAutoencoder) -> list[Tuple[Union[str, Callable], Callable]]:
+        x = None
+        def hook_in(tensor: torch.Tensor, hook: HookPoint):
+            nonlocal x
+            x = tensor
+            return tensor
+        def hook_out(acts_out: torch.Tensor, hook: HookPoint):
+            nonlocal x
+            assert x is not None, "hook_in must be called before hook_out."
+
+            reconstructed,_,_,_,_,_ = sae.forward(x)
+            tc_out, feature_acts, _,_,_,_ = tc(x)
+
+            tc_error = (acts_out - tc_out).detach().clone()
+            
+            if track_grads:
+                 track_grad(tc_error)
+                 track_grad(tc_out)
+                 track_grad(feature_acts)
+                 track_grad(x)
+
+            tc_activations[hook.name] = TcReconstructionCache(
+                     tc_in = x,
+                     feature_acts = feature_acts,
+                     tc_out = tc_out,
+                     tc_error = tc_error
+                     )
+            x = None
+            if include_error_term:
+                return tc_out + tc_error
+            else:
+                return tc_out
+        return [(sae.cfg.hook_point, hook_in), (sae.cfg.out_hook_point, hook_out)]
 
     def reconstruct_sae_hook(sae_in,hook:HookPoint, hook_point: str):
         sae = saes_dict[hook_point]
@@ -164,6 +170,40 @@ def apply_and_run(
 
 
 
+    def compose_hooks(*hooks):
+        """
+        Compose multiple hooks into a single hook by executing them in order.
+        """
+        def composed_hook(tensor: torch.Tensor, hook: HookPoint):
+            for hook_fn in hooks:
+                tensor = hook_fn(tensor, hook)
+            return tensor
+        return composed_hook
+
+    def retain_grad_hook(tensor: torch.Tensor, hook: HookPoint):
+        """
+        Retain the gradient of the tensor at the given hook point.
+        """
+        tensor.retain_grad()
+        return tensor
+
+    def detach_hook(tensor: torch.Tensor, hook: HookPoint):
+        """
+        Detach the tensor at the given hook point.
+        """
+        return tensor.detach().requires_grad_(True)
+
+    def generate_attribution_score_filter_hook():
+        v = None
+        def fwd_hook(tensor: torch.Tensor, hook: HookPoint):
+            nonlocal v
+            v = tensor
+            return tensor
+        def attribution_score_filter_hook(grad: torch.Tensor, hook: HookPoint):
+            print(hook.name)
+            assert v is not None, "fwd_hook must be called before attribution_score_filter_hook."
+            return (torch.where(v * grad*0 > threshold, grad, torch.zeros_like(grad)),)
+        return fwd_hook, attribution_score_filter_hook
 
 
     def sae_bwd_hook(output_grads: torch.Tensor, hook:HookPoint):
@@ -174,11 +214,14 @@ def apply_and_run(
             track_grad(hook_input)
         return hook_input
 
+    attribution_score_filter_hooks = {candidate: generate_attribution_score_filter_hook() for candidate in tcs_dict.keys()}
     for hook_point,tc in tcs_dict.items():
-        hook_point_in = tc.cfg.hook_point
-        fwd_hooks.append( (hook_point_in, caching_hook_in))
-        fwd_hooks.append((hook_point, partial(reconstruct_hook, hook_in = hook_point_in)))
-        bwd_hooks.append((hook_point,sae_bwd_hook))
+        gfw = get_fwd_hooks(tc)
+        fwd_hooks.append(gfw[0])
+        fwd_hooks.append(gfw[1])
+        fwd_hooks.append((hook_point, compose_hooks(attribution_score_filter_hooks[hook_point][0], retain_grad_hook)) )
+        bwd_hooks.append((tc.cfg.hook_point, attribution_score_filter_hooks[hook_point][1]) )
+
     for hook_point in track_model_hooks or []:
         fwd_hooks.append((hook_point,partial(tracking_hook, hook_point=hook_point)))
     # run the model while applying the hooks
@@ -187,6 +230,7 @@ def apply_and_run(
                 (hook_point,partial(reconstruct_sae_hook, hook_point= hook_point))
                 )
         bwd_hooks.append((hook_point,sae_bwd_hook))
+
 
     with model.hooks(fwd_hooks = fwd_hooks, bwd_hooks = bwd_hooks):
         model_output = model(input, return_type = return_type)
@@ -263,12 +307,16 @@ def calculate_attribution_grads(
         include_error_term=include_error_term,
         track_grads=True,
     )
-    downstream = output.sae_activations["blocks.5.attn.hook_z"].feature_acts
+    #downstream = output.sae_activations["blocks.5.attn.hook_z"].feature_acts
+    output.zero_grad()
+    value = output.model_output.sum()
     
-    gradients = torch.zeros_like(downstream)
-    gradients[:,:,attn_feature_index] = 1.0
-    value = metric_fn(downstream)
-    value.backward(gradients)
+    #gradients = torch.zeros_like(downstream)
+    #gradients[:,:,attn_feature_index] = 1.0
+    #output.zero_grad()
+    #value = metric_fn(downstream)
+    #value.backward(gradients)
+    value.backward()
     model.reset_hooks()
 
 
@@ -393,23 +441,20 @@ def calculate_feature_attribution(
 
 if __name__ == "__main__":
 
-    from transformer_lens import HookedTransformer, utils
-    model = HookedSAETransformer.from_pretrained('gpt2')
+    model = HookedTransformer.from_pretrained('gpt2')
 
 
     transcoder_template = "/media/workspace//gpt-2-small-transcoders/final_sparse_autoencoder_gpt2-small_blocks.{}.ln2.hook_normalized_24576"
     transcoders = []
     sparsities = []
-    for i in range(5):
+    for i in range(3,4):
         transcoders.append(SparseAutoencoder.load_from_pretrained(f"{transcoder_template.format(i)}.pt").eval())
         sparsities.append(torch.load(f"{transcoder_template.format(i)}_log_feature_sparsity.pt"))
 
     include_tcs = {tc.cfg.out_hook_point: tc for tc in transcoders}
-    include_saes = get_attention_sae_dict(list(range(6)),device = device)
-
+    include_saes = get_attention_sae_dict(list(range(4,5)),device = device)
 
     attr = calculate_feature_attribution(model, "Hello, my name is", metric_fn, include_tcs=include_tcs,include_saes = include_saes,attn_feature_index = 10823)
-
 
 
 

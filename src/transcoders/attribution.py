@@ -1,9 +1,6 @@
 
 
-import os
-from struct import calcsize
 import torch
-from tqdm import tqdm
 import plotly.express as px
 import pandas as pd
 import requests
@@ -18,10 +15,6 @@ from tqdm import tqdm
 from transformer_lens.hook_points import HookedRootModule, HookPoint
 import os
 from sae_training.sparse_autoencoder import SparseAutoencoder
-from dataclasses import dataclass
-from functools import partial
-from typing import Any,Literal, NamedTuple, Callable
-from transformer_lens.hook_points import HookPoint
 
 torch.set_grad_enabled(False)
 
@@ -124,8 +117,8 @@ def apply_tcs_and_run(
 
 
     def sae_bwd_hook(output_grads: torch.Tensor, hook:HookPoint):
-        print(hook.name)
-        return (output_grads,)
+        pass
+        #return (output_grads,)
     
     def tracking_hook(hook_input: torch.Tensor, hook:HookPoint, hook_point: str):
         model_activations[hook_point] = hook_input
@@ -141,6 +134,7 @@ def apply_tcs_and_run(
     for hook_point in track_model_hooks or []:
         fwd_hooks.append((hook_point,partial(tracking_hook, hook_point=hook_point)))
     # run the model while applying the hooks
+    print(bwd_hooks)
 
     with model.hooks(fwd_hooks = fwd_hooks, bwd_hooks = bwd_hooks):
         model_output = model(input, return_type = return_type)
@@ -300,7 +294,7 @@ if __name__ == "__main__":
     attr = calculate_feature_attribution(model, "Hello, my name is", lambda x: x.sum(), include_tcs=tcs_dict)
 
 
-    print(attr.tc_feature_attributions["blocks.2.hook_mlp_out"].sum())
+    print(attr.tc_feature_grads["blocks.2.hook_mlp_out"].sum())
 
 
 
