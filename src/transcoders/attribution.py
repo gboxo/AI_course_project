@@ -117,8 +117,7 @@ def apply_tcs_and_run(
 
 
     def sae_bwd_hook(output_grads: torch.Tensor, hook:HookPoint):
-        pass
-        #return (output_grads,)
+        return (output_grads,)
     
     def tracking_hook(hook_input: torch.Tensor, hook:HookPoint, hook_point: str):
         model_activations[hook_point] = hook_input
@@ -134,10 +133,15 @@ def apply_tcs_and_run(
     for hook_point in track_model_hooks or []:
         fwd_hooks.append((hook_point,partial(tracking_hook, hook_point=hook_point)))
     # run the model while applying the hooks
-    print(bwd_hooks)
 
     with model.hooks(fwd_hooks = fwd_hooks, bwd_hooks = bwd_hooks):
         model_output = model(input, return_type = return_type)
+    for key,val in cache_in.items():
+        print(f"Cacche in {key} {val.retain_grad}")
+    for key,val in tc_activations.items():
+        for k,v in val._asdict().items():
+            print(f"Tc activations {key} {k} {v.retain_grad}")
+
 
 
 
@@ -198,6 +202,10 @@ def calculate_attribution_grads(
         include_error_term=include_error_term,
         track_grads=True,
     )
+
+
+
+
     metric = metric_fn(output.model_output)
     output.zero_grad()
     metric.backward()
