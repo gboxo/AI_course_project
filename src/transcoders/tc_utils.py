@@ -1,4 +1,4 @@
-
+from sae_lens import SAE
 from transformer_lens import HookedTransformer
 from transformer_lens.hook_points import HookPoint
 from typing import List, Tuple, Union, Callable, Dict, Any
@@ -47,11 +47,45 @@ def mount_hooked_modules(
     model.setup()
     yield model
 
+@contextmanager
+def apply_sae(model:HookedTransformer,
+            saes: list[SAE]) :
 
+    fwd_hooks: list[Tuple[Union[str, Callable], Callable]] = []
+    def get_fwd_hooks(sae: SAE) -> list[Tuple[Union[str, Callable], Callable]]:
+        def hook(tensor: torch.Tensor, hook: HookPoint):
+            reconstructed = sae.forward(tensor)
+            return reconstructed + (tensor - reconstructed).detach()
+        return [(sae.cfg.hook_name, hook)]
 
+    for sae in saes:
+        hooks = get_fwd_hooks(sae)
+        fwd_hooks.extend(hooks)
+    with mount_hooked_modules(model,[(sae.cfg.hook_name, "sae", sae) for sae in saes]):
+        with model.hooks(fwd_hooks):
+            yield model
+
+def set_deep_attr(obj: Any, path: str, value: Any):
+    """Helper function to change the value of a nested attribute from a object.
+    In practice used to swap HookedTransformer HookPoints (eg model.blocks[0].attn.hook_z) with HookedSAEs and vice versa
+
+    Args:
+        obj: Any object. In practice, this is a HookedTransformer (or subclass)
+        path: str. The path to the attribute you want to access. (eg "blocks.0.attn.hook_z")
+        value: Any. The value you want to set the attribute to (eg a HookedSAE object)
+    """
+    parts = path.split(".")
+    # Navigate to the last component in the path
+    for part in parts[:-1]:
+        if part.isdigit():  # This is a list index
+            obj = obj[int(part)]
+        else:  # This is an attribute
+            obj = getattr(obj, part)
+    # Set the value on the final attribute
+    setattr(obj, parts[-1], value)
 
 @contextmanager
-def apply_sae(
+def apply_tc(
     model: HookedTransformer,
     saes: list[SparseAutoencoder]
 ):

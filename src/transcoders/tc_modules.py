@@ -14,12 +14,17 @@ from tc_utils import (
     retain_grad_hook,
     detach_hook,
     mount_hooked_modules,
+    apply_tc,
     apply_sae,
     Node,
     Cache
         )
 
 from transformer_lens.hook_points import NamesFilter
+from sae_utils import get_attention_sae_dict
+
+
+
 
 def get_ref_caching_hooks(
     model,
@@ -229,25 +234,28 @@ class HierachicalAttributor(Attributor):
 
 if __name__ == "__main__":
     model = HookedTransformer.from_pretrained("gpt2")
+    sae_dict = get_attention_sae_dict(layers = [0,1,2,3,4])
+    saes = [value for value in sae_dict.values()]
 
-    transcoder_template = "/media/workspace/gpt-2-small-transcoders/final_sparse_autoencoder_gpt2-small_blocks.{}.ln2.hook_normalized_24576"
+
+    transcoder_template  = "/media/workspace/gpt-2-small-transcoders/final_sparse_autoencoder_gpt2-small_blocks.{}.ln2.hook_normalized_24576"
 
     tcs_dict = {}
     for i in range(5):
         tc = SparseAutoencoder.load_from_pretrained(f"{transcoder_template.format(i)}.pt").eval()
         tcs_dict[tc.cfg.hook_point] = tc
-    saes = list(tcs_dict.values())
+    tcs = list(tcs_dict.values())
 
     candidates = None
     toks = "The"
 
-    with apply_sae(model, saes):
-        with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
-            attributor = HierachicalAttributor(model = model)
+    with apply_tc(model, tcs):
+        with apply_sae(model, saes):
+            with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
+                attributor = HierachicalAttributor(model = model)
 
-            target = Node("blocks.4.hook_mlp_out.sae.hook_hidden_post",reduction="0.1.6720")
-            if candidates is None:
-                candidates = [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in saes[:-1]] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(12)]
-            circuit = attributor.attribute(toks=toks, target=target, candidates=candidates, threshold=0.1)
-            print(len(circuit["nodes"].keys()))
-            print(circuit)
+                target = Node("blocks.4.hook_mlp_out.sae.hook_hidden_post",reduction="0.1.6720")
+                if candidates is None:
+                    candidates = [Node(f"{sae.cfg.hook_name}.sae.hook_sae_acts_post") for sae in saes] + [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in tcs[:-1]] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(12)]
+                circuit = attributor.attribute(toks=toks, target=target, candidates=candidates, threshold=0.1)
+                print(circuit)
