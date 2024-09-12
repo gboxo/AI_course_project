@@ -1,4 +1,6 @@
 from multiprocess import context
+import json
+import random
 from transformer_lens import HookedTransformer
 from transformer_lens.hook_points import HookPoint
 from typing import List, Tuple, Union, Callable, Dict, Any, Optional
@@ -208,6 +210,7 @@ class HierachicalAttributor(Attributor):
 
 
             for candidate in candidates:
+                print(candidate)
                 grad = cache.grad(candidate)
                 if grad is None:
                     continue
@@ -227,15 +230,77 @@ class HierachicalAttributor(Attributor):
 
         return circuit
 
+import networkx as nx
+import matplotlib.pyplot as plt
+import re
 
+def extract_vertical_position(node_name):
+    match = re.search(r'blocks\.(\d+)', node_name)
+    return int(match.group(1)) if match else 0
+
+def extract_horizontal_position(node_name):
+    match = re.search(r'\[.*?(\d+)', node_name)
+    return int(match.group(1)) if match else 0
+def visualize_circuit(circuit):
+    # Create a new directed graph
+    G = nx.DiGraph()
+
+    # Add nodes to the graph
+    for node, data in circuit["nodes"].items():
+        G.add_node(node, **data)
+
+    # Add edges to the graph
+    for edge in circuit["edges"]:
+        source, target, data = edge
+        G.add_edge(source, target, **data)
+
+    # Set up the plot
+    plt.figure(figsize=(20, 16))
+    
+    # Calculate node sizes based on attribution
+    node_sizes = [data['attribution'] * 1000 for node, data in G.nodes(data=True)]
+    
+    # Calculate edge widths based on attribution
+    edge_widths = [data['attribution'] * 5 for (u, v, data) in G.edges(data=True)]
+
+    # Create custom positions for nodes with jitter
+    pos = {}
+    for node in G.nodes():
+        x = extract_horizontal_position(node.reduction) + random.uniform(-0.3, 0.3)
+        y = extract_vertical_position(node.hook_point) + random.uniform(-0.6, 0.6)  # Not negated now
+        pos[node] = (x, y)
+
+    # Draw the graph
+    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color='lightblue')
+    nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color='gray', arrows=True)
+    
+    # Adjust label positions slightly above nodes
+    label_pos = {node: (x, y + 0.1) for node, (x, y) in pos.items()}
+    nx.draw_networkx_labels(G, label_pos, font_size=8)
+
+    # Add a title
+    plt.title("Circuit Visualization (Sorted with Jitter)")
+    
+    # Show the plot
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
 
 
 
 
 if __name__ == "__main__":
     model = HookedTransformer.from_pretrained("gpt2")
-    sae_dict = get_attention_sae_dict(layers = [0,1,2,3,4])
+    sae_dict = get_attention_sae_dict(layers = [0,1,2,3,4,5])
     saes = [value for value in sae_dict.values()]
+
+
+    with open("5-att-kk-148.json", "r") as f:
+        feat_dict = json.load(f)
+
+    strings = ["".join(elem["tokens"]) for elem in feat_dict["activations"]]
+    toks = strings[0]
+    first_pos = 10
 
 
     transcoder_template  = "/media/workspace/gpt-2-small-transcoders/final_sparse_autoencoder_gpt2-small_blocks.{}.ln2.hook_normalized_24576"
@@ -247,15 +312,36 @@ if __name__ == "__main__":
     tcs = list(tcs_dict.values())
 
     candidates = None
-    toks = "The"
 
     with apply_tc(model, tcs):
         with apply_sae(model, saes):
             with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
                 attributor = HierachicalAttributor(model = model)
 
-                target = Node("blocks.4.hook_mlp_out.sae.hook_hidden_post",reduction="0.1.6720")
+                target = Node("blocks.5.attn.hook_z.sae.hook_sae_acts_post",reduction="0.11.148")
                 if candidates is None:
-                    candidates = [Node(f"{sae.cfg.hook_name}.sae.hook_sae_acts_post") for sae in saes] + [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in tcs[:-1]] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(12)]
+                    candidates = [Node(f"{sae.cfg.hook_name}.sae.hook_sae_acts_post") for sae in saes[:-1]] + [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in tcs] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(12)]
                 circuit = attributor.attribute(toks=toks, target=target, candidates=candidates, threshold=0.1)
-                print(circuit)
+    visualize_circuit(circuit)
+
+# %%
+# Improve the node with QK
+circuit2 = {}
+circuit2["nodes"] = circuit["nodes"]
+circuit2["edges"] = circuit["edges"] 
+
+
+
+# For each attention patther node in the circuit (from 0 to 11) connect with edges
+for i in range(6):
+    attn_pattern_node = [node for node in circuit["nodes"] if "attn_scores" in node.hook_point and node.hook_point.split(".")[1] == str(i)]
+    feat_node_layers = [node for node in circuit["nodes"] if "attn_scores" not in node.hook_point and node.hook_point.split(".")[1] == str(i)]
+    attn_pattern_edges = [edge for edge in circuit["edges"] if "attn_scores" in edge[0].hook_point and edge[0].hook_point.split(".")[1] == str(i)]
+    attn_pattern_edges = [edge for edge in circuit["edges"] if "attn_scores" not in edge[0].hook_point and edge[0].hook_point.split(".")[1] == str(i)]
+
+
+    for attn_node in feat_node_layers:
+        for feat_node in feat_node_layers:
+            circuit2["edges"].append((attn_node, feat_node, {"attribution": 1.0}))
+
+visualize_circuit(circuit2)
