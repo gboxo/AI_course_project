@@ -83,6 +83,7 @@ class ActivationsColector:
                  filename: Optional[str] = None,
                  device: str = "cpu",
                  batch_size: int = 256,
+                 stop_at_layer:int = 11
                  
 
                  ):
@@ -96,6 +97,7 @@ class ActivationsColector:
         self.activation_dir = activation_dir
         self.device = device
         self.cat_activations = cat_activations
+        self.stop_at_layer = stop_at_layer
         with open(location_dictionary_path+"/final_dict.json") as f:
             self.location_dictionary = json.load(f)
         self.quantize = quantize
@@ -205,7 +207,7 @@ class ActivationsColector:
                     _,cache = self.model.run_with_cache(input_ids)
                 elif self.type_activations == "Features":
                     filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)
-                    _,cache = self.model.run_with_cache_with_saes(input_ids,saes = [sae  for _,sae in self.saes_dict.items() ], names_filter = filter_sae_acts)
+                    _,cache = self.model.run_with_cache_with_saes(input_ids,saes = [sae  for _,sae in self.saes_dict.items() ], names_filter = filter_sae_acts, stop_at_layer = self.stop_at_layer)
 
 
             for hook in self.modules:

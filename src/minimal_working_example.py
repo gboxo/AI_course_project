@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from sae_utils import get_attention_sae_dict
-from html_visualization import create_visualization_loss, create_visualization_plotly
 import einops
 
 
@@ -34,12 +33,14 @@ sae_dict = get_attention_sae_dict([5],device = device)
 # %%
 
 acts = []
+first_pos = []
 filter_sae_acts = lambda name: "hook_sae_acts_post" in name 
 with  torch.no_grad():
     for tok in tokens:
          _,cache = model.run_with_cache_with_saes(tok,saes = [sae  for _,sae in sae_dict.items() ], names_filter = filter_sae_acts)
          acts.append(cache["blocks.5.attn.hook_z.hook_sae_acts_post"][0,:,148])
-
+         first_pos.append(torch.argmax((cache["blocks.5.attn.hook_z.hook_sae_acts_post"][:,:,148]!=0).to(torch.int), dim =  -1))
+first_pos = torch.tensor(first_pos)
 # filter the prompts with no activations
 
 tok_is_active = [tok for act,tok in zip(acts,tokens) if act.sum() != 0]
@@ -80,7 +81,7 @@ accumulated_residual, labels = cache.accumulated_resid(
         layer = 5,incl_mid=False,  return_labels=True,apply_ln = False)
 
 
-first_pos = torch.argmax((cache["blocks.5.attn.hook_z.hook_sae_acts_post"][:,:,148]!=0).to(torch.int), dim =  -1)
+# %%
 
 results = []
 for i,pos in enumerate(first_pos):
@@ -99,11 +100,29 @@ plt.ylim(0,10)
 plt.show()
 
 
+# ============ Experiments ==========
+# 1) Cosine Similarity between the activations in the SAE bassis between all the prompts (layer 0 to 4 first poisition)
+
+# %%
+
+sae_dict = get_attention_sae_dict(list(range(5)),device = device)
+
+all_toks = model.to_tokens(strings, prepend_bos = False)
+with  torch.no_grad():
+    _,cache = model.run_with_cache_with_saes(all_toks,saes = [sae  for _,sae in sae_dict.items() ], stop_at_layer = 5)
+
+acts = torch.stack([torch.stack([cache[f"blocks.{l}.attn.hook_z.hook_sae_acts_post"][j,first_pos[j].item()] for i,l in enumerate(range(5))]) for j in range(40) if first_pos[j].item() != 0])
+
+del cache 
+
+# %%
+
+similarity_matrix = torch.zeros(36,5)
+for i in range(36):
+    for j in range(5):
+        print(i)
+        print(j)
+        similarity_matrix[i,j] = torch.nn.functional.cosine_similarity(acts[i,j],acts[i+1,j])
 
 
-
-
-
-
-
-
+# %%
