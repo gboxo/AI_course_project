@@ -192,6 +192,7 @@ class HierachicalAttributor(Attributor):
                 v = tensor
                 return tensor
             def attribution_score_filter_hook(grad: torch.Tensor, hook: HookPoint):
+                print(hook.name)
                 assert v is not None, "fwd_hook must be called before attribution_score_filter_hook."
                 return (torch.where(v * grad > threshold, grad, torch.zeros_like(grad)),)
             return fwd_hook, attribution_score_filter_hook
@@ -210,8 +211,11 @@ class HierachicalAttributor(Attributor):
 
 
             for candidate in candidates:
-                print(candidate)
+                if candidate.hook_point == target.hook_point:
+                    continue
                 grad = cache.grad(candidate)
+                if grad is None:
+                    continue
                 if grad is None:
                     continue
                 attributions = grad * cache[candidate]
@@ -318,30 +322,38 @@ if __name__ == "__main__":
             with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
                 attributor = HierachicalAttributor(model = model)
 
-                target = Node("blocks.5.attn.hook_z.sae.hook_sae_acts_post",reduction="0.11.148")
+                target = Node("blocks.5.attn.hook_z.sae.hook_sae_acts_post",reduction="0.12.148")
                 if candidates is None:
-                    candidates = [Node(f"{sae.cfg.hook_name}.sae.hook_sae_acts_post") for sae in saes[:-1]] + [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in tcs] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(12)]
+                    candidates = [Node(f"{sae.cfg.hook_name}.sae.hook_sae_acts_post") for sae in saes[:-1]] + [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in tcs] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(5)]
                 circuit = attributor.attribute(toks=toks, target=target, candidates=candidates, threshold=0.1)
     visualize_circuit(circuit)
 
+# Check the sums
+
+
 # %%
-# Improve the node with QK
-circuit2 = {}
-circuit2["nodes"] = circuit["nodes"]
-circuit2["edges"] = circuit["edges"] 
+
+    total_attribution = circuit["nodes"][target]["attribution"]
+    attribution_by_comp = {"attn_score":0,
+                           "TC":0,
+                           "SAE":0}
+
+    for node in circuit["nodes"]:
+        if node == target:
+            continue
+
+        if "attn_scores" in node.hook_point:
+            attribution_by_comp["attn_score"] += circuit["nodes"][node]["attribution"]
+        elif "hook_hidden_post" in node.hook_point:
+            attribution_by_comp["TC"] += circuit["nodes"][node]["attribution"]
+        elif "hook_sae_acts_post" in node.hook_point:
+            attribution_by_comp["SAE"] += circuit["nodes"][node]["attribution"]
+
+    print(attribution_by_comp)
 
 
 
-# For each attention patther node in the circuit (from 0 to 11) connect with edges
-for i in range(6):
-    attn_pattern_node = [node for node in circuit["nodes"] if "attn_scores" in node.hook_point and node.hook_point.split(".")[1] == str(i)]
-    feat_node_layers = [node for node in circuit["nodes"] if "attn_scores" not in node.hook_point and node.hook_point.split(".")[1] == str(i)]
-    attn_pattern_edges = [edge for edge in circuit["edges"] if "attn_scores" in edge[0].hook_point and edge[0].hook_point.split(".")[1] == str(i)]
-    attn_pattern_edges = [edge for edge in circuit["edges"] if "attn_scores" not in edge[0].hook_point and edge[0].hook_point.split(".")[1] == str(i)]
 
 
-    for attn_node in feat_node_layers:
-        for feat_node in feat_node_layers:
-            circuit2["edges"].append((attn_node, feat_node, {"attribution": 1.0}))
 
-visualize_circuit(circuit2)
+
