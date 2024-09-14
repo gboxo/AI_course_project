@@ -1,5 +1,4 @@
-"""
-Mullti Token Circuits
+### Mullti Token Circuits
 
 What are multlitoken circuits in the context of max  activating dataset examples for a given attention features.
 
@@ -20,5 +19,31 @@ This introduces a tradeoff because a very similar thing can be naively done by j
 
 
 
-"""
+
+## Methods
+
+### Hierarchical attribution
+
+
+
+### Circuit Finding
+
+**Formulas**
+
+
+$$
+
+\text{Attention Scores} = x_i W^h_Q W^h_Q x_j^T = 
+$$
+
+$$
+\text{AttnScore}^{h}(x)_{ij} = x_i W_Q^{hT} W_K^{h} x_j^{T}
+\\
+= \sum_{S,T \in \text{Upstream SAEs}} \sum_{p=1}^{d_{\text{SAE}}} \sum_{q=1}^{d_{\text{SAE}}} f_{i,p}^{S} W_{D_p}^{S} W_Q^{hT} W_K^{h} W_{D_q}^{T} f_{j,q'}^{T}
+
+$$
+
+
+
+
 
