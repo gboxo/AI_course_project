@@ -1,4 +1,6 @@
-from multiprocess import context
+
+from transformer_lens.hook_points import NamesFilter
+from sae_utils import get_attention_sae_dict
 import json
 import random
 from transformer_lens import HookedTransformer
@@ -21,10 +23,16 @@ from tc_utils import (
     Node,
     Cache
         )
-
-from transformer_lens.hook_points import NamesFilter
-from sae_utils import get_attention_sae_dict
-
+from plot_circuit import visualize_circuit
+from h_attr_utils import (
+        get_attention_score_nodes,
+        sort_nodes_by_attribution,
+        get_upstream_nodes_pos,
+        get_decoder,
+        compute_prods,
+        compute_QK_edges,
+        compute_all_edges
+        )
 
 
 
@@ -234,62 +242,15 @@ class HierachicalAttributor(Attributor):
 
         return circuit
 
-import networkx as nx
-import matplotlib.pyplot as plt
-import re
 
-def extract_vertical_position(node_name):
-    match = re.search(r'blocks\.(\d+)', node_name)
-    return int(match.group(1)) if match else 0
 
-def extract_horizontal_position(node_name):
-    match = re.search(r'\[.*?(\d+)', node_name)
-    return int(match.group(1)) if match else 0
-def visualize_circuit(circuit):
-    # Create a new directed graph
-    G = nx.DiGraph()
 
-    # Add nodes to the graph
-    for node, data in circuit["nodes"].items():
-        G.add_node(node, **data)
-
-    # Add edges to the graph
-    for edge in circuit["edges"]:
-        source, target, data = edge
-        G.add_edge(source, target, **data)
-
-    # Set up the plot
-    plt.figure(figsize=(20, 16))
-    
-    # Calculate node sizes based on attribution
-    node_sizes = [data['attribution'] * 1000 for node, data in G.nodes(data=True)]
-    
-    # Calculate edge widths based on attribution
-    edge_widths = [data['attribution'] * 5 for (u, v, data) in G.edges(data=True)]
-
-    # Create custom positions for nodes with jitter
-    pos = {}
-    for node in G.nodes():
-        x = extract_horizontal_position(node.reduction) + random.uniform(-0.3, 0.3)
-        y = extract_vertical_position(node.hook_point) + random.uniform(-0.6, 0.6)  # Not negated now
-        pos[node] = (x, y)
-
-    # Draw the graph
-    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color='lightblue')
-    nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color='gray', arrows=True)
-    
-    # Adjust label positions slightly above nodes
-    label_pos = {node: (x, y + 0.1) for node, (x, y) in pos.items()}
-    nx.draw_networkx_labels(G, label_pos, font_size=8)
-
-    # Add a title
-    plt.title("Circuit Visualization (Sorted with Jitter)")
-    
-    # Show the plot
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
-
+@contextmanager
+def join_contexts(model,tcs,saes):
+    with apply_tc(model, tcs):
+        with apply_sae(model, saes):
+            with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
+                yield
 
 
 
@@ -350,101 +311,6 @@ if __name__ == "__main__":
             attribution_by_comp["SAE"] += circuit["nodes"][node]["attribution"]
 
     print(attribution_by_comp)
-
-
-
-
-# How to fint the edges between nodes
-
-# To find the edges between attention sccore nodes and features in lower layers we:
-# 1. Select the most important attention score node, get the WQ and wK matrices for that head.
-# 2. Get the decoder of the features in the lower layers present in that position.
-# 3. Multiply the WDi@WQ@WK@WDj
-# 4. Get the total attribution and normalize it to add up  to the total attribution of the attention score node.
-
-# %%
-
-# Get the  the attention score nodes of the first layer (starting from 1)
-
-def get_attention_score_nodes(circuit,layer):
-    return [node for node in circuit["nodes"] if f"blocks.{layer}" in node.hook_point and "attn_scores" in node.hook_point]
-
-
-# Sort the attention score nodes by attribution
-def sort_nodes_by_attribution(circuit,nodes):
-    return sorted(nodes,key = lambda node: circuit["nodes"][node]["attribution"],reverse=True)
-
-# Get the WQ and WK matrices of the attention score node
-def attn_matrices(model,attn_score_node):
-    layer = int(attn_score_node.hook_point.split(".")[1])
-    head = int(attn_score_node.reduction.split(".")[1])
-    WQ = model.blocks[layer].attn.W_Q.detach()[head]
-    WK = model.blocks[layer].attn.W_K.detach()[head]
-    return WQ,WK
-
-# Get the upstream nodes in a certain position
-def get_upstream_nodes_pos(circuit,pos,layer):
-    upstream_nodes = []
-    for node in circuit["nodes"].keys():
-        node_layer = int(node.hook_point.split(".")[1])
-        node_pos = node.reduction.split(".")[1]
-
-        if "sae" in node.hook_point and node_layer < layer and node_pos == pos:
-            upstream_nodes.append(node)
-    return upstream_nodes
-
-# Get the decoder of a SAE node
-
-def get_decoder(sae_node):
-    assert "attn_scores" not in sae_node.hook_point
-    if "hook_sae_acts_post" in sae_node.hook_point:
-        layer = int(sae_node.hook_point.split(".")[1])
-        feature = int(sae_node.reduction.split(".")[-1])
-        return saes[layer].W_dec.detach()[feature]
-    elif "hook_hidden_post" in sae_node.hook_point:
-        layer = int(sae_node.hook_point.split(".")[1])
-        feature = int(sae_node.reduction.split(".")[-1])
-        return tcs[layer].W_dec.detach()[feature]
-
-
-
-# Compute the multiplication of the matrices
-
-
-def compute_prods(WQ,WK,decoder1,decoder2):
-    return decoder1 @ WQ @ WK.T @ decoder2.T
-# Compute the attributions matrix multiplication
-
-def compute_QK_edges(circuit,layer):
-    attn_score_nodes = get_attention_score_nodes(circuit,layer)
-    attn_score_nodes = sort_nodes_by_attribution(circuit,attn_score_nodes)
-    for attn_score_node in attn_score_nodes:
-        attrb = circuit["nodes"][attn_score_node]["attribution"]
-        WQ,WK = attn_matrices(model,attn_score_node)
-        pos1 = attn_score_node.reduction.split(".")[2]
-        pos2 = attn_score_node.reduction.split(".")[3]
-        upstream_nodes_pos1 = get_upstream_nodes_pos(circuit,pos1,layer)
-        upstream_nodes_pos2 = get_upstream_nodes_pos(circuit,pos2,layer)
-        prods = []
-        for upstream_node1 in upstream_nodes_pos1:
-            decoder1 = get_decoder(upstream_node1)
-            for upstream_node2 in upstream_nodes_pos2:
-                decoder2 = get_decoder(upstream_node2)
-                prod = compute_prods(WQ,WK,decoder1,decoder2)
-                prods.append(prod)
-        for i,upstream_node1 in enumerate(upstream_nodes_pos1): 
-            for j,upstream_node2 in enumerate(upstream_nodes_pos2):
-                prod = prods[i*len(upstream_nodes_pos2)+j]
-                circuit["edges"].append((upstream_node1,upstream_node2,{"attribution":(attrb*(prod/sum(prods))).item()}))
-    return circuit
-
-
-
-
-def compute_all_edges(circuit):
-    for layer in range(1,6):
-        circuit = compute_QK_edges(circuit,layer)
-    return circuit
 
 
 
