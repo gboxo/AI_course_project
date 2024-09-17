@@ -224,8 +224,6 @@ class HierachicalAttributor(Attributor):
                 grad = cache.grad(candidate)
                 if grad is None:
                     continue
-                if grad is None:
-                    continue
                 attributions = grad * cache[candidate]
                 if len(attributions.shape) == 0:
                     if attributions > threshold:

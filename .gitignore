@@ -10,6 +10,12 @@ __pycache__/
 /activations/
 /clusters/
 /final_dicts/
-
+/datset/
+/datset/
 # Ignore virtual environment
 venv/
+
+
+*.pt
+*.json
+

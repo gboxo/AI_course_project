@@ -1,0 +1,67 @@
+# Get the max activating dataset examples for each feature for 5.Attn.SAE
+# Right truncate each prompt from the right (get till the max act token)
+# Left truncate each prompt to achieve 80% of the original max activation
+
+
+import json
+from sae_lens import SAE, SAEConfig, HookedSAETransformer
+import torch
+import numpy as np
+import torch.nn as nn
+from jaxtyping import Int, Float 
+from datasets import load_dataset
+from torch.utils.data import DataLoader, dataset
+from tqdm import tqdm
+from collections import defaultdict
+from sae_utils import get_attention_sae_dict
+from transformer_lens.ActivationCache import ActivationCache
+from sae_utils import get_attention_sae_dict
+import os
+
+"""
+The process is simple select a feature from a layer, sae and perform attribution wrt to that feature
+"""
+
+def get_max_act_dataset(model, feature_id,path):
+
+    with open(path, "r") as f:
+        data = json.load(f)
+    tok_list = ["".join([tok if model.to_tokens(tok,prepend_bos = False).shape[1]==1 else " " for tok in elem["tokens"] ]) for i,elem in enumerate(data["activations"]) if i%2==0]
+    tokens = {i:model.to_tokens(tok, prepend_bos = False) for i,tok in enumerate(tok_list)}
+    max_positions = []
+
+
+    name_filter = lambda x: "blocks.5.attn.hook_z.hook_sae_acts_post" in x
+    for tok in tokens.values():
+        _,cache = model.run_with_cache(tok)
+        act = cache["blocks.5.attn.hook_z.hook_sae_acts_post"][:,:,feature_id]
+        max_pos = act.argmax(dim = -1).item()
+        max_positions.append(max_pos)
+
+    right_truncated = {i:(idx,seq[0,:idx].tolist()) for idx,(i,seq) in zip(max_positions,tokens.items()) if idx>0}
+    
+    return right_truncated
+
+
+if __name__ == "__main__":
+    model = HookedSAETransformer.from_pretrained("gpt2", device = "cpu")
+    sae_dict = get_attention_sae_dict(layers = [5])
+    sae = list(sae_dict.values())[0]
+    sae.use_error_term = True
+    model.add_sae(sae)
+    all_file_names = os.listdir("../dataset/")
+    r_truncated_seqs = defaultdict(list) 
+    
+    for file_name in tqdm(all_file_names):
+        feature_id = int(file_name.split(".")[0])
+        r_truncated_seqs[feature_id] = get_max_act_dataset(model,feature_id,"../dataset/"+file_name)
+
+    with open("full_dataset.json","w") as f:
+        json.dump(r_truncated_seqs,f)
+
+
+
+
+
+
+
