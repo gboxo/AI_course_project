@@ -1,5 +1,6 @@
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import pandas as pd
 from PIL import Image
@@ -78,11 +79,15 @@ total_attrb_per_comp = defaultdict(dict)
 for feat,trace in comp_traces.items():
     for ex_idx,ex_trace in trace.items():
         for comp,tr in ex_trace.items():
-            if total_attrb_per_comp[feat].get(comp):
-                total_attrb_per_comp[feat][comp] += tr.sum() 
+            if not total_attrb_per_comp[feat].get(comp):
+                total_attrb_per_comp[feat][comp] = []
+                total_attrb_per_comp[feat][comp].append(tr.sum()) 
             else:
-                total_attrb_per_comp[feat][comp] = tr.sum()
-
+                total_attrb_per_comp[feat][comp].append(tr.sum()) 
+# Convert to tensor
+for feat,trace in total_attrb_per_comp.items():
+    for comp,tr in trace.items():
+        total_attrb_per_comp[feat][comp] = torch.stack(tr)
 
 
 
@@ -91,7 +96,7 @@ for feat,trace in comp_traces.items():
 # Sample data for the scatter plot
 
 # Title of the app
-st.title("Streamlit Interactive App")
+st.title("AI Alignment Course Final Project")
 
 # Page selection menu
 page = st.selectbox("Select a page:", ["Feature Exploration", "Theory", "Comparisons"])
@@ -111,8 +116,8 @@ if page == "Feature Exploration":
     average_dist = all_dists.mean(dim = 0) 
     mean_average_dist = average_dist.mean(dim = 0)
     total_feat_attrb = torch.stack([val for val in total_attrb[feature].values()])
-    x = torch.stack((mean_average_dist,total_feat_attrb),dim = 0).numpy()
-    df = pd.DataFrame(1-x.T, columns=["Trace Similarity","Max Activation"])
+    x = torch.stack((1-mean_average_dist,total_feat_attrb),dim = 0).numpy()
+    df = pd.DataFrame(x.T, columns=["Trace Similarity","Max Activation"])
     top_features = top_components[feature]
     columns = list(top_features.keys())
     columns.sort()
@@ -159,7 +164,7 @@ if page == "Feature Exploration":
     # Scatter Plot section
     st.header("Section 2: Scatter Plot")
     st.write("Scatter plot of the Trace Similarity vs. Max Activation")
-    scatter_fig = px.scatter(df, x="Trace Similarity", y="Max Activation", title='Trace Similarity vs. Max Activation')
+    scatter_fig = px.scatter(df, x="Max Activation",y="Trace Similarity",  title='Trace Similarity vs. Max Activation')
     st.plotly_chart(scatter_fig)
 
     # Top Features section
@@ -192,12 +197,48 @@ if page == "Feature Exploration":
     # Line plot section
     st.header("Section 5: Line Plot")
     st.write("Line plot of the running mean of the average pairwise similarity between the traces of each example.")
-    plt.figure(figsize=(10, 6))
-    sns.lineplot(x=range(len(total_feat_attrb_per_comp.values())), y=np.array(list(total_feat_attrb_per_comp.values())))
-    # use the keys as the x-axis labels
-    plt.xticks(range(len(total_feat_attrb_per_comp.keys())), list(total_feat_attrb_per_comp.keys()), rotation=45)
-    plt.title("Total Attribution per Component")
-    st.pyplot(plt)
+    # Create a Plotly figure
+    fig = go.Figure()
+
+    # Add each line to the figure
+    
+    inverted_dict = {}
+
+# Number of original tensors (in this case, it's 3)
+    num_tensors = len(total_feat_attrb_per_comp)
+
+# Inverting the dictionary
+    for index in range(len(next(iter(total_feat_attrb_per_comp.values())))):  # Length of the tensors
+        inverted_dict[index] = np.array([tensor[index] for tensor in total_feat_attrb_per_comp.values()])
+
+
+
+
+
+
+    for key, tensor in inverted_dict.items():
+        fig.add_trace(go.Scatter(
+            x=list(range(len(tensor))),  # X-axis values
+            y=tensor,              # Y-axis values (tensor)
+            mode='lines+markers',   # Display lines with markers
+            name=key               # Name of the line (used in the legend)
+        ))
+
+    # Update layout for better appearance
+    fig.update_layout(
+        title="Total Attribution per Component",
+        xaxis_title="Components",
+        yaxis_title="Values",
+        xaxis=dict(tickmode='array', tickvals=list(range(len(total_feat_attrb_per_comp))), ticktext=list(total_feat_attrb_per_comp.keys())),
+        height=600
+    )
+
+    # Display the plot in Streamlit
+    st.plotly_chart(fig)
+
+
+
+
     
 
 
