@@ -116,7 +116,7 @@ if page == "Feature Exploration":
     average_dist = all_dists.mean(dim = 0) 
     mean_average_dist = average_dist.mean(dim = 0)
     total_feat_attrb = torch.stack([val for val in total_attrb[feature].values()])
-    x = torch.stack((1-mean_average_dist,total_feat_attrb),dim = 0).numpy()
+    x = torch.stack((mean_average_dist,total_feat_attrb),dim = 0).numpy()
     df = pd.DataFrame(x.T, columns=["Trace Similarity","Max Activation"])
     top_features = top_components[feature]
     columns = list(top_features.keys())
@@ -181,7 +181,7 @@ if page == "Feature Exploration":
     # Retrieve the selected tensor
     selected_tensor = distance_tensors[selected_tensor_name]
 
-    df = pd.DataFrame(1-selected_tensor.numpy(), columns=range(selected_tensor.shape[0]))
+    df = pd.DataFrame(selected_tensor.numpy(), columns=range(selected_tensor.shape[0]))
 
     st.subheader(f"Heatmap for {selected_tensor_name}")
     plt.figure(figsize=(8, 4))
@@ -338,7 +338,7 @@ elif page == "Comparisons":
     st.header("Encoder Similarity vs Trace Similarity")
     st.write("Scatter plot of the similarity between the encoder of two features vs. the similarity between the computational trace of the same two features averaged over the examples.")
     x = torch.stack((avg_dist.triu(1).reshape(-1),feat_sims["enc"].triu(1).reshape(-1)),dim = 0).numpy()
-    df = pd.DataFrame(1-x.T, columns=["Trace Similarity","Encoder Similarity"])
+    df = pd.DataFrame(x.T, columns=["Trace Similarity","Encoder Similarity"])
     scatter_fig = px.scatter(df, x="Trace Similarity", y="Encoder Similarity", title='Encoder Similarity vs Trace Similarity')
     st.plotly_chart(scatter_fig)
 
@@ -348,7 +348,7 @@ elif page == "Comparisons":
     st.header("Decoder Similarity vs Trace Similarity")
     st.write("Scatter plot of the similarity between the decoder of two features vs. the similarity between the computational trace of the same two features averaged over the examples.")
     x = torch.stack((avg_dist.triu(1).reshape(-1),feat_sims["dec"].triu(1).reshape(-1)),dim = 0).numpy()
-    df = pd.DataFrame(1-x.T, columns=["Trace Similarity","Decoder Similarity"])
+    df = pd.DataFrame(x.T, columns=["Trace Similarity","Decoder Similarity"])
     scatter_fig = px.scatter(df, x="Trace Similarity", y="Decoder Similarity", title='Decoder Similarity vs Trace Similarity')
     st.plotly_chart(scatter_fig)
 

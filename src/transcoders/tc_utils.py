@@ -35,33 +35,49 @@ def detach_hook(tensor: torch.Tensor, hook: HookPoint):
 @contextmanager
 def mount_hooked_modules(
     model: HookedTransformer,
-    hooked_modules: List[Tuple[str, str, SparseAutoencoder]]
+    hooked_modules: List[Tuple[str, str, Any]]
 ):
     """
     Mount the hooked modules to the model.
     """
-    for name, module_name, sae in hooked_modules:
+    for name, module_name, module in hooked_modules:
         hook_point = model.mod_dict[name]
-        hook_point._modules[module_name] = sae
+        hook_point._modules[module_name] = module
 
     model.setup()
     yield model
 
 @contextmanager
 def apply_sae(model:HookedTransformer,
-            saes: list[SAE]) :
+            saes: list[Any]) :
+
+
 
     fwd_hooks: list[Tuple[Union[str, Callable], Callable]] = []
-    def get_fwd_hooks(sae: SAE) -> list[Tuple[Union[str, Callable], Callable]]:
-        def hook(tensor: torch.Tensor, hook: HookPoint):
-            reconstructed = sae.forward(tensor)
-            return reconstructed + (tensor - reconstructed).detach()
-        return [(sae.cfg.hook_name, hook)]
+    def get_fwd_hooks(sae: Any) -> list[Tuple[Union[str, Callable], Callable]]:
+        if isinstance(sae, SAE):
+            def hook(tensor: torch.Tensor, hook: HookPoint):
+                reconstructed = sae.forward(tensor)
+                return reconstructed + (tensor - reconstructed).detach()
+            return [(sae.cfg.hook_name, hook)]
+        else:
 
+            x = None
+            def hook_in(tensor: torch.Tensor, hook: HookPoint):
+                nonlocal x
+                x = tensor
+                return tensor
+            def hook_out(tensor: torch.Tensor, hook: HookPoint):
+                nonlocal x
+                assert x is not None, "hook_in must be called before hook_out."
+                reconstructed,_,_,_,_,_, = sae.forward(x)
+                x = None
+                return reconstructed + (tensor - reconstructed).detach()
+            return [(sae.cfg.hook_point, hook_in), (sae.cfg.out_hook_point, hook_out)]
     for sae in saes:
         hooks = get_fwd_hooks(sae)
         fwd_hooks.extend(hooks)
-    with mount_hooked_modules(model,[(sae.cfg.hook_name, "sae", sae) for sae in saes]):
+    with mount_hooked_modules(model,[(sae.cfg.hook_name, "sae", sae) if isinstance(sae,SAE) else (sae.cfg.out_hook_point,"sae",sae) for sae in saes]):
         with model.hooks(fwd_hooks):
             yield model
 
@@ -107,12 +123,39 @@ def apply_tc(
 
             return reconstructed + (tensor - reconstructed).detach()
         return [(sae.cfg.hook_point, hook_in), (sae.cfg.out_hook_point, hook_out)]
+
+
     for sae in saes:
         hooks = get_fwd_hooks(sae)
         fwd_hooks.extend(hooks)
     with mount_hooked_modules(model,[(sae.cfg.out_hook_point, "sae", sae) for sae in saes]):
         with model.hooks(fwd_hooks):
             yield model
+
+
+@contextmanager
+def detach_at(
+    model,
+    hook_points: list[str],
+):
+    """
+    Detach the gradients on the given hook points.
+    """
+
+    def generate_hook():
+        hook_pre = HookPoint()
+        hook_post = HookPoint()
+        def hook(tensor: torch.Tensor, hook: HookPoint):
+            return hook_post(hook_pre(tensor).detach().requires_grad_())
+        return hook_pre, hook_post, hook
+    
+    hooks = {hook_point: generate_hook() for hook_point in hook_points}
+    fwd_hooks = [(hook_point, hook) for hook_point, (_, _, hook) in hooks.items()]
+    with mount_hooked_modules(model,[(hook_point, "pre", hook) for hook_point, (hook, _, _) in hooks.items()] + [(hook_point, "post", hook) for hook_point, (_, hook, _) in hooks.items()]):
+        with model.hooks(fwd_hooks):
+            yield model
+
+
 
 
 @dataclass(frozen=True)

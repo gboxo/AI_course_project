@@ -1,6 +1,6 @@
-
+# %%
 from transformer_lens.hook_points import NamesFilter
-from sae_utils import get_attention_sae_dict
+from sae_utils import get_attention_sae_dict, get_attention_sae_out_dict
 import json
 import random
 from transformer_lens import HookedTransformer
@@ -21,7 +21,8 @@ from tc_utils import (
     apply_tc,
     apply_sae,
     Node,
-    Cache
+    Cache,
+    detach_at
         )
 from plot_circuit import visualize_circuit
 from h_attr_utils import (
@@ -35,7 +36,7 @@ from h_attr_utils import (
         )
 
 
-
+# %%
 def get_ref_caching_hooks(
     model,
     names_filter,
@@ -124,6 +125,7 @@ def run_with_ref_cache(
     return model_out, cache_dict
 
 
+
 class Attributor(ABC):
     def __init__(
         self,
@@ -191,7 +193,7 @@ class HierachicalAttributor(Attributor):
                 showing its "importance" w.r.t. the target.
         """
 
-        threshold: int = kwargs.get("threshold", 0.1)
+        threshold: int = kwargs.get("threshold", 0.01)
     
         def generate_attribution_score_filter_hook():
             v = None
@@ -211,7 +213,9 @@ class HierachicalAttributor(Attributor):
             bwd_hooks=[(candidate.hook_point, attribution_score_filter_hooks[candidate][1]) for candidate in candidates]
         ):
             cache = self.cache_nodes(toks, candidates + [target])
-            cache[target].backward()
+            print("\n".join(list(cache.cache.keys())))
+            output_tensor = cache[target]
+            cache[target].backward(retain_graph=True)
 
             # Construct the circuit
             circuit = {"nodes": {}, "edges": []}
@@ -238,24 +242,27 @@ class HierachicalAttributor(Attributor):
                         circuit["edges"].append((node_name, target, {"attribution": attributions[index].item()}))                        
 
 
-        return circuit
+        return circuit,cache, output_tensor
 
 
 
-
+# %%
 @contextmanager
-def join_contexts(model,tcs,saes):
-    with apply_tc(model, tcs):
-        with apply_sae(model, saes):
-            with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
-                yield
+def join_contexts(model,tcs,saes,candidates):
+    saes = tcs + saes
+    with apply_sae(model, saes):
+        #with apply_tc(model, tcs):
+        with detach_at(model, candidates):
+            yield
 
 
-
+# %%
 if __name__ == "__main__":
-    model = HookedTransformer.from_pretrained("gpt2")
-    sae_dict = get_attention_sae_dict(layers = [0,1,2,3,4,5])
+    model = HookedTransformer.from_pretrained("gpt2",fold_ln=True, fold_value_biases = True)
+    #sae_dict = get_attention_sae_dict(layers = [5])
+    sae_dict = get_attention_sae_out_dict(layers = [0,1,2,3,4,5])
     saes = [value for value in sae_dict.values()]
+    # %%
 
 
     with open("5-att-kk-148.json", "r") as f:
@@ -274,42 +281,75 @@ if __name__ == "__main__":
         tcs_dict[tc.cfg.hook_point] = tc
     tcs = list(tcs_dict.values())
 
+
+
+
+ # %%
     candidates = None
+    all_saes = saes + tcs
 
-    with apply_tc(model, tcs):
-        with apply_sae(model, saes):
-            with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
-                attributor = HierachicalAttributor(model = model)
+    with apply_sae(model, all_saes):
+        with model.hooks([(f"blocks.{i}.attn.hook_attn_scores", detach_hook) for i in range(12)]):
+            attributor = HierachicalAttributor(model = model)
 
-                target = Node("blocks.5.attn.hook_z.sae.hook_sae_acts_post",reduction="0.12.148")
-                if candidates is None:
-                    candidates = [Node(f"{sae.cfg.hook_name}.sae.hook_sae_acts_post") for sae in saes[:-1]] + [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in tcs] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(12)]
-                circuit = attributor.attribute(toks=toks, target=target, candidates=candidates, threshold=0.06)
-    visualize_circuit(circuit)
+            target = Node("blocks.5.hook_attn_out.sae.hook_sae_acts_post",reduction="0.9.8506")
+    
+            if candidates is None:
+                candidates = [Node("hook_embed")]+[Node("hook_pos_embed")]+[Node(f"{sae.cfg.hook_name}.sae.hook_sae_acts_post") for sae in saes] + [Node(f"{sae.cfg.out_hook_point}.sae.hook_hidden_post") for sae in tcs] + [Node(f"blocks.{i}.attn.hook_attn_scores") for i in range(12)]
+            circuit,cache = attributor.attribute(toks=toks, target=target, candidates=candidates, threshold=0.01)
+    #visualize_circuit(circuit)
 
 # Check the sums
 
 
+
+
 # %%
+    from collections import defaultdict
 
     total_attribution = circuit["nodes"][target]["attribution"]
+    print(total_attribution)
     attribution_by_comp = {"attn_score":0,
-                           "TC":0,
-                           "SAE":0}
+                            "TC":0,
+                            "SAE":0}
+    attribution_by_comp = {}  
+    for layer in range(6):
+        attribution_by_comp[layer] = {"attn_score":0,
+                            "TC":0,
+                            "SAE":0}
 
     for node in circuit["nodes"]:
+        if "embed" in node.hook_point:
+            continue
+        layer = int(node.hook_point.split(".")[1])
         if node == target:
             continue
 
         if "attn_scores" in node.hook_point:
-            attribution_by_comp["attn_score"] += circuit["nodes"][node]["attribution"]
+            attribution_by_comp[layer]["attn_score"] += circuit["nodes"][node]["attribution"]
         elif "hook_hidden_post" in node.hook_point:
-            attribution_by_comp["TC"] += circuit["nodes"][node]["attribution"]
+            attribution_by_comp[layer]["TC"] += circuit["nodes"][node]["attribution"]
         elif "hook_sae_acts_post" in node.hook_point:
-            attribution_by_comp["SAE"] += circuit["nodes"][node]["attribution"]
+            attribution_by_comp[layer]["SAE"] += circuit["nodes"][node]["attribution"]
+
+
+    total_leaf_node_attrb = 0
+    total_score_attrb = 0
+    for layer,val in attribution_by_comp.items():
+        for comp,att in val.items():
+            if "score" in comp:
+                total_score_attrb += att
+                continue
+            total_leaf_node_attrb += att
+
 
     print(attribution_by_comp)
-
+    print(total_leaf_node_attrb)
+    print(total_score_attrb)
+    for key,val in attribution_by_comp.items():
+        print(f"Layer {key}")
+        for k,v in val.items():
+            print(f"Component {k} attribution {v}")
 
 
 

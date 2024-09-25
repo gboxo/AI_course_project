@@ -24,6 +24,21 @@ For all features
 
 
 
+"""
+comparison_dict = {}
+for i in range(len(feats)):
+    for j in range(i+1,len(feats)):
+        feat1 = feats[i]
+        feat2 = feats[j]
+        ex_comp_dict = defaultdict(dict) 
+        for ex_idx,ex_trace in comp_traces[feat1].items():
+            for ex_idx2,ex_trace2 in comp_traces[feat2].items():
+                for comp in ex_trace.keys():
+                    dist = torch.nn.functional.cosine_similarity(ex_trace[comp],ex_trace2[comp],dim = 0)
+                    ex_comp_dict[comp][(ex_idx,ex_idx2)] = dist
+        comparison_dict[(feat1,feat2)] = ex_comp_dict
+
+"""
 
 
 import json
@@ -67,12 +82,21 @@ def get_computational_trace(path):
 
     
 
+def return_wenc_w_dec(sae,feature_id):
+    W_enc = sae.W_enc[feature_id]
+    W_dec = sae.W_dec[feature_id]
+    
+
+
+
+
+
 
 
 
 if __name__ == "__main__":
     #model = HookedSAETransformer.from_pretrained("gpt2", device = "cpu")
-    #sae_dict = get_attention_sae_dict(layers = [5])
+    sae_dict = get_attention_sae_dict(layers = [5])
 
     all_file_names_dataset = os.listdir("../../dataset/")
     with open("full_dataset.json","r") as f:
@@ -83,6 +107,34 @@ if __name__ == "__main__":
     explanations = [get_explanation("../../dataset/"+file_name) for file_name in all_file_names_dataset]
     # Convert to set and    
     feats = list(set(feats_with_acts).intersection(set(feats_with_data)))
+
+
+
+
+    # Get the feaure pairwise cos sim for encoder and decoder
+    enc_dict = {}
+    dec_dict = {}
+    for feat in feats:
+        sae = list(sae_dict.values())[0]
+        enc_dict[feat] = sae.W_enc.detach()[:,feat].unsqueeze(0)
+        dec_dict[feat] = sae.W_dec.detach()[feat].unsqueeze(1)
+    enc_sim_mat = torch.zeros((len(feats),len(feats)))
+    for i,(feat1,enc1) in enumerate(enc_dict.items()):
+        for j,(feat2,enc2) in enumerate(enc_dict.items()):
+            enc_sim = torch.nn.functional.cosine_similarity(enc1,enc2,dim = 1)
+            print(enc_sim)
+            enc_sim_mat[i][j] = enc_sim
+
+    dec_sim_mat = torch.zeros((len(feats),len(feats)))
+    for i,(feat1,dec1) in enumerate(dec_dict.items()):
+        for j,(feat2,dec2) in enumerate(dec_dict.items()):
+            dec_sim = torch.nn.functional.cosine_similarity(dec1,dec2,dim = 1)
+            print(dec_sim)
+            dec_sim_mat[i][j] = dec_sim
+    feat_sims = {"enc":enc_sim_mat,"dec":dec_sim_mat,"feats":feats}
+    torch.save(feat_sims,"app_data/feat_sims.pt")
+
+if False:
 
 
     computational_traces = defaultdict(dict) 
@@ -151,6 +203,25 @@ if __name__ == "__main__":
     torch.save(dist_comp,"app_data/feat_pairwise_dist_comp.pt")
 
     # Get the feaure pairwise cos sim for encoder and decoder
+    enc_dict = {}
+    dec_dict = {}
+    for feat in feats:
+        sae = list(sae_dict.values())[0]
+        enc_dict[feat] = sae.W_enc.detach()[:,feat].unsqueeze(0)
+        dec_dict[feat] = sae.W_dec.detach()[feat].unsqueeze(1)
+    enc_sim_mat = torch.zeros((len(feats),len(feats)))
+    for i,(feat1,enc1) in enumerate(enc_dict.items()):
+        for j,(feat2,enc2) in enumerate(enc_dict.items()):
+            enc_sim = torch.nn.functional.cosine_similarity(enc1,enc2,dim = 1)
+            enc_sim_mat[i][j] = enc_sim
+
+    dec_sim_mat = torch.zeros((len(feats),len(feats)))
+    for i,(feat1,dec1) in enumerate(dec_dict.items()):
+        for j,(feat2,dec2) in enumerate(dec_dict.items()):
+            dec_sim = torch.nn.functional.cosine_similarity(dec1,dec2,dim = 0)
+            dec_sim_mat[i][j] = dec_sim
+    feat_sims = {"enc":enc_sim_mat,"dec":dec_sim_mat,"feats":feats}
+    torch.save(feat_sims,"app_data/feat_sims.pt")
 
 
 
