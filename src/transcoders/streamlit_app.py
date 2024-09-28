@@ -4,15 +4,10 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import pandas as pd
 from PIL import Image
-import streamlit as st
 import plotly.express as px
 import pandas as pd
-from PIL import Image
 import seaborn as sns
-
-import pandas as pd
 import json
-from sae_lens import SAE, SAEConfig, HookedSAETransformer
 import torch
 import numpy as np
 import torch.nn as nn
@@ -24,7 +19,6 @@ from collections import defaultdict
 from sae_utils import get_attention_sae_dict
 from transformer_lens.ActivationCache import ActivationCache
 from sae_utils import get_attention_sae_dict
-from data_for_app import get_explanation
 import base64
 
 
@@ -46,19 +40,19 @@ import base64
 
 
 
+feat_sims = torch.load("feat_sims.pt")
+feats = feat_sims["feats"].tolist()
 
-dist_comp = torch.load("app_data/dist_comp.pt")
-top_components = torch.load("app_data/top_components.pt")
+dist_comp = torch.load("dist_comp.pt")
+top_components = torch.load("top_components.pt")
 
-
-feat_pairwise = torch.load("app_data/feat_pairwise_dist_comp.pt")
+feat_pairwise = torch.load("feat_pairwise_dist_comp.pt")
 comps = list(feat_pairwise.keys())
 avg_dist = torch.stack([val for val in feat_pairwise.values()]).mean(dim = 0)
-feat_sims = torch.load("app_data/feat_sims.pt")
-
-explanations = {file_name:get_explanation("../../dataset/"+str(file_name)+".json") for file_name in list(dist_comp.keys())}
-comp_traces = torch.load("app_data/computational_traces.pt")
-comp_traces = {k: comp_traces[k] for k in dist_comp.keys()}
+with open("explanations_dict.json") as f:
+    explanations = json.load(f)
+comp_traces = torch.load("comp_traces.pt")
+#comp_traces = {k: comp_traces[k] for k in dist_comp.keys()}
 feats = list(comp_traces.keys())
 # This must be interchanged with Max Act ASAP
 total_attrb = defaultdict(dict) 
@@ -73,17 +67,19 @@ feat_sims["feats"] = np.array(feat_sims["feats"])[bool_array].tolist()
 
 for feat,trace in comp_traces.items():
     for ex_idx,ex_trace in trace.items():
-        total_attrb[feat][ex_idx] = sum([val.sum() for val in ex_trace.values()]) 
+        ex_trace = ex_trace["Mean trace"]
+        total_attrb[feat][ex_idx] = sum([val.detach().sum() for val in ex_trace.values()]) 
 
 total_attrb_per_comp = defaultdict(dict) 
 for feat,trace in comp_traces.items():
     for ex_idx,ex_trace in trace.items():
+        ex_trace = ex_trace["Mean trace"]
         for comp,tr in ex_trace.items():
             if not total_attrb_per_comp[feat].get(comp):
                 total_attrb_per_comp[feat][comp] = []
-                total_attrb_per_comp[feat][comp].append(tr.sum()) 
+                total_attrb_per_comp[feat][comp].append(tr.detach().sum()) 
             else:
-                total_attrb_per_comp[feat][comp].append(tr.sum()) 
+                total_attrb_per_comp[feat][comp].append(tr.detach().sum()) 
 # Convert to tensor
 for feat,trace in total_attrb_per_comp.items():
     for comp,tr in trace.items():
@@ -130,8 +126,9 @@ if page == "Feature Exploration":
         elif comp == "hook_mlp_out":
             comp = "TC-MLP"
         columns_alias.append(f"L{layer} {comp}")
-    arrays = torch.stack([val for val in top_features.values()],dim = -1).numpy()[0]
-    top_features_df = pd.DataFrame(arrays.T, columns=columns_alias)
+    arrays = torch.stack([val for val in top_features.values()],dim = -1).numpy()#[0]
+    top_features_df = pd.DataFrame(arrays, columns=columns_alias)
+    top_features_df[top_features_df == -1] = " " 
     distance_tensors = {key:val for key,val in zip(columns_alias,dist_list)}
     total_feat_attrb_per_comp = {key:val.numpy() for key,val in zip(columns_alias,[total_attrb_per_comp[feature][comp] for comp in columns])}
 
@@ -160,7 +157,7 @@ if page == "Feature Exploration":
     )
 
 # Display text with the light blue background
-    st.markdown(f'<div class="highlight">{explanations[feature]}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="highlight">{explanations[str(feature)]}</div>', unsafe_allow_html=True)
     # Scatter Plot section
     st.header("Section 2: Scatter Plot")
     st.write("Scatter plot of the Trace Similarity vs. Max Activation")
