@@ -41,6 +41,7 @@ for i in range(len(feats)):
 """
 
 
+from sae_training.sparse_autoencoder import SparseAutoencoder
 import json
 from sae_lens import SAE, SAEConfig, HookedSAETransformer
 import torch
@@ -96,18 +97,22 @@ def return_wenc_w_dec(sae,feature_id):
 
 if __name__ == "__main__":
     model = HookedSAETransformer.from_pretrained("gpt2", device = "cpu")
-    sae_dict = get_attention_sae_out_dict(layers = [5])
 
+    transcoder_template  = "/media/workspace/gpt-2-small-transcoders/final_sparse_autoencoder_gpt2-small_blocks.{}.ln2.hook_normalized_24576"
+    i = 5
+    tc = SparseAutoencoder.load_from_pretrained(f"{transcoder_template.format(i)}.pt").eval()
 
-    all_file_names_dataset = os.listdir("../../dataset/")
-    with open("full_dataset.json","r") as f:
+    all_file_names_dataset = os.listdir("app_data")
+    with open("full_dataset_filter.json","r") as f:
         full_dataset = json.load(f)
-    all_file_names_act = os.listdir("../../dataset_acts/")   
-    feats_with_acts = [int(file_name.split("_")[0]) for file_name in all_file_names_act]
-    feats_with_data = [int(file_name.split(".")[0]) for file_name in all_file_names_dataset]
-    explanations = [get_explanation("../../dataset/"+file_name) for file_name in all_file_names_dataset]
-    # Convert to set and    
+    feats_with_acts = [int(file_name.split("_")[0]) for file_name in full_dataset]
+    feats_with_data = [int(file_name.split("_")[2]) for file_name in all_file_names_dataset]
     feats = list(set(feats_with_acts).intersection(set(feats_with_data)))
+    feats_file_dict = {feat: [file_name for file_name in all_file_names_dataset if int(file_name.split("_")[2]) == feat] for feat in feats}
+    x = torch.load("app_data/"+feats_file_dict[feats[0]][0])
+    components = list(x["Mean trace"].keys())
+    #explanations = [get_explanation("../../dataset/"+file_name) for file_name in all_file_names_dataset]
+    # Convert to set and    
 
 
 
@@ -116,114 +121,97 @@ if __name__ == "__main__":
     enc_dict = {}
     dec_dict = {}
     for feat in feats:
-        sae = list(sae_dict.values())[0]
-        enc_dict[feat] = sae.W_enc.detach()[:,feat].unsqueeze(0)
-        dec_dict[feat] = sae.W_dec.detach()[feat].unsqueeze(1)
+        enc_dict[feat] = tc.W_enc.detach()[:,feat].unsqueeze(0)
+        dec_dict[feat] = tc.W_dec.detach()[feat].unsqueeze(1)
     enc_sim_mat = torch.zeros((len(feats),len(feats)))
     for i,(feat1,enc1) in enumerate(enc_dict.items()):
         for j,(feat2,enc2) in enumerate(enc_dict.items()):
             enc_sim = torch.nn.functional.cosine_similarity(enc1,enc2,dim = 1)
-            print(enc_sim)
             enc_sim_mat[i][j] = enc_sim
 
     dec_sim_mat = torch.zeros((len(feats),len(feats)))
     for i,(feat1,dec1) in enumerate(dec_dict.items()):
         for j,(feat2,dec2) in enumerate(dec_dict.items()):
-            dec_sim = torch.nn.functional.cosine_similarity(dec1,dec2,dim = 1)
-            print(dec_sim)
+            dec_sim = torch.nn.functional.cosine_similarity(dec1.T,dec2.T,dim = 1)
             dec_sim_mat[i][j] = dec_sim
     feat_sims = {"enc":enc_sim_mat,"dec":dec_sim_mat,"feats":feats}
-    torch.save(feat_sims,"app_data/feat_sims.pt")
+    torch.save(feat_sims,"feat_sims.pt")
+
+    if False:
+
+        computational_traces = defaultdict(dict) 
+        # Get the computational trace
+        for feat in feats:
+            feat_acts_paths = ["app_data/"+file_name for file_name in all_file_names_act if int(file_name.split("_")[0]) == feat]
+            example_trace = {}
+            for path in feat_acts_paths:
+                example_id = int(path.split("_")[2])
+                trace = get_computational_trace(path)
+                total_attr = sum([val.sum() for val in trace.values()])
+                print(total_attr)
+                if total_attr == 0:
+                    continue
+                computational_traces[feat][example_id] = trace
+        torch.save(computational_traces,"app_data/computational_traces.pt")
 
 if False:
 
-
-    computational_traces = defaultdict(dict) 
-    # Get the computational trace
-    for feat in feats:
-        feat_acts_paths = ["../../dataset_acts/"+file_name for file_name in all_file_names_act if int(file_name.split("_")[0]) == feat]
-        example_trace = {}
-        for path in feat_acts_paths:
-            example_id = int(path.split("_")[2])
-            trace = get_computational_trace(path)
-            total_attr = sum([val.sum() for val in trace.values()])
-            print(total_attr)
-            if total_attr == 0:
-                continue
-            computational_traces[feat][example_id] = trace
-    torch.save(computational_traces,"app_data/computational_traces.pt")
-
-
-    # Get the per comp distance
-    computational_traces = torch.load("app_data/computational_traces.pt")
-    components = list(list(list(computational_traces.values())[0].values())[0].keys())
-    dist_comp = defaultdict(dict)
-    for feat,traces in computational_traces.items():
+        # Get the per comp distance
+        dist_comp = defaultdict(dict)
         for comp in components:
-            mat = torch.zeros((len(traces),len(traces)))
-            for i,(ex_idx, ex_trace) in enumerate(traces.items()):
-                for j,(ex_idx2, ex_trace2) in enumerate(traces.items()):
-                    dist = torch.nn.functional.cosine_similarity(ex_trace[comp],ex_trace2[comp],dim = 1)
+            for feat,file_names in feats_file_dict.items():
+                mat = torch.zeros((len(file_names),len(file_names)))
+                for file1 in file_names:
+                    trace1 = torch.load("app_data/"+file1)
+                    for file2 in file_names:
+                        trace2 = torch.load("app_data/"+file2)
+                        dist = torch.nn.functional.cosine_similarity(trace1["Mean trace"][comp],trace2["Mean trace"][comp],dim = 0)
+                        mat[file_names.index(file1)][file_names.index(file2)] = dist
+                dist_comp[comp][feat] = mat
+
+        torch.save(dist_comp,"dist_comp.pt")
+
+
+if False:
+        print("Computing top components")
+        # Get the top components by layer and type  
+
+        comp_aggregations = defaultdict(dict)
+        for feats,file_list in feats_file_dict.items():
+            aggregation_dict = defaultdict(dict)
+            for file_name in file_list:
+                trace = torch.load("app_data/"+file_name)
+                for comp in components:
+                    if comp not in aggregation_dict:
+                        aggregation_dict[comp] = []
+                    aggregation_dict[comp].append(trace["Mean trace"][comp])
+            for c in aggregation_dict.keys():
+                comp_aggregations[feats][c] = torch.stack(aggregation_dict[c]).mean(dim = 0)
+
+
+
+        top_components = defaultdict(dict)
+        for feat,comp_dict in comp_aggregations.items():
+            for comp,comp_trace in comp_dict.items():
+                # Modify to only get components with more than 0 total attribution
+                if comp_trace.max() == 0:
+                    continue
+                top_components[feat][comp] = comp_trace.topk(10).indices
+        torch.save(top_components,"top_components.pt")
+
+
+if False:
+        # Get the pairwise cos sim between component traces
+
+        dist_comp = {}
+        for comp in components:
+            mat = torch.zeros((len(computational_traces),len(computational_traces)))
+            for i,(feat1,traces1) in enumerate(computational_traces.items()):
+                agg_trace1 = torch.stack([val[comp] for val in traces1.values()]).mean(dim = 0)
+                for j,(feat2,traces2) in enumerate(computational_traces.items()):
+                    agg_trace2 = torch.stack([val[comp] for val in traces2.values()]).mean(dim = 0)
+                    dist = torch.nn.functional.cosine_similarity(agg_trace1,agg_trace2,dim = 1)
                     mat[i][j] = dist
-            dist_comp[feat][comp] = mat
-    torch.save(dist_comp,"app_data/dist_comp.pt")
-
-
-
-    # Get the top components by layer and type  
-
-    computational_traces = torch.load("app_data/computational_traces.pt")
-    components = list(list(list(computational_traces.values())[0].values())[0].keys())
-    comp_aggregations = defaultdict(dict)
-    for feat,comp_dict in computational_traces.items():
-        for comp in components:
-            comp_aggregations[feat][comp] = torch.stack([val[comp] for val in comp_dict.values()]).mean(dim = 0)
-
-    top_components = defaultdict(dict)
-    for feat,comp_dict in comp_aggregations.items():
-        for comp,comp_trace in comp_dict.items():
-            # Modify to only get components with more than 0 total attribution
-            top_components[feat][comp] = comp_trace.topk(10).indices
-    torch.save(top_components,"app_data/top_components.pt")
-
-
-
-    # Get the pairwise cos sim between component traces
-    computational_traces = torch.load("app_data/computational_traces.pt")
-    components = list(list(list(computational_traces.values())[0].values())[0].keys())
-    dist_comp = {}
-    for comp in components:
-        mat = torch.zeros((len(computational_traces),len(computational_traces)))
-        for i,(feat1,traces1) in enumerate(computational_traces.items()):
-            agg_trace1 = torch.stack([val[comp] for val in traces1.values()]).mean(dim = 0)
-            for j,(feat2,traces2) in enumerate(computational_traces.items()):
-                agg_trace2 = torch.stack([val[comp] for val in traces2.values()]).mean(dim = 0)
-                dist = torch.nn.functional.cosine_similarity(agg_trace1,agg_trace2,dim = 1)
-                mat[i][j] = dist
-        dist_comp[comp] = mat
-    torch.save(dist_comp,"app_data/feat_pairwise_dist_comp.pt")
-
-    # Get the feaure pairwise cos sim for encoder and decoder
-    enc_dict = {}
-    dec_dict = {}
-    for feat in feats:
-        sae = list(sae_dict.values())[0]
-        enc_dict[feat] = sae.W_enc.detach()[:,feat].unsqueeze(0)
-        dec_dict[feat] = sae.W_dec.detach()[feat].unsqueeze(1)
-    enc_sim_mat = torch.zeros((len(feats),len(feats)))
-    for i,(feat1,enc1) in enumerate(enc_dict.items()):
-        for j,(feat2,enc2) in enumerate(enc_dict.items()):
-            enc_sim = torch.nn.functional.cosine_similarity(enc1,enc2,dim = 1)
-            enc_sim_mat[i][j] = enc_sim
-
-    dec_sim_mat = torch.zeros((len(feats),len(feats)))
-    for i,(feat1,dec1) in enumerate(dec_dict.items()):
-        for j,(feat2,dec2) in enumerate(dec_dict.items()):
-            dec_sim = torch.nn.functional.cosine_similarity(dec1,dec2,dim = 0)
-            dec_sim_mat[i][j] = dec_sim
-    feat_sims = {"enc":enc_sim_mat,"dec":dec_sim_mat,"feats":feats}
-    torch.save(feat_sims,"app_data/feat_sims.pt")
-
-
-
+            dist_comp[comp] = mat
+        torch.save(dist_comp,"feat_pairwise_dist_comp.pt")
 

@@ -41,11 +41,12 @@ def get_max_act_dataset(model,tc, feature_id,path):
         with apply_sae(model, all_saes):
             name_filter = lambda x: x in candidates
             _, cache = run_with_ref_cache(model,toks = toks, names_filter=name_filter)
-            max_pos = cache["blocks.5.hook_mlp_out.sae.hook_hidden_post"][0][:,feature_id].argmax().item()
+            acts = cache["blocks.5.hook_mlp_out.sae.hook_hidden_post"][0][:,feature_id]
+            max_pos = acts.argmax().item()
             max_positions.append(max_pos)
 
 
-    right_truncated = {i:(idx,seq[0,:idx].tolist()) for idx,(i,seq) in zip(max_positions,tokens.items()) if idx>0}
+    right_truncated = {i:(idx,seq[0,:idx+1].tolist()) for idx,(i,seq) in zip(max_positions,tokens.items()) if idx>0}
     
     return right_truncated
 
