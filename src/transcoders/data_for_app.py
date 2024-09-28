@@ -53,7 +53,7 @@ from tqdm import tqdm
 from collections import defaultdict
 from sae_utils import get_attention_sae_dict
 from transformer_lens.ActivationCache import ActivationCache
-from sae_utils import get_attention_sae_dict
+from sae_utils import get_attention_sae_out_dict
 import os
 
 
@@ -95,8 +95,9 @@ def return_wenc_w_dec(sae,feature_id):
 
 
 if __name__ == "__main__":
-    #model = HookedSAETransformer.from_pretrained("gpt2", device = "cpu")
-    sae_dict = get_attention_sae_dict(layers = [5])
+    model = HookedSAETransformer.from_pretrained("gpt2", device = "cpu")
+    sae_dict = get_attention_sae_out_dict(layers = [5])
+
 
     all_file_names_dataset = os.listdir("../../dataset/")
     with open("full_dataset.json","r") as f:
@@ -222,45 +223,6 @@ if False:
             dec_sim_mat[i][j] = dec_sim
     feat_sims = {"enc":enc_sim_mat,"dec":dec_sim_mat,"feats":feats}
     torch.save(feat_sims,"app_data/feat_sims.pt")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

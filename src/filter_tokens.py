@@ -80,6 +80,23 @@ class PredictionFilter:
         with open(file_path, "wb") as f:
             torch.save(check_point_dict, f)
 
+
+    def get_correct_position(self) -> None:
+        # Similar to get_correct_sequences but instead of getting contiguous sequences, we get the positions of correct predictions
+        all_checkpoints = os.listdir(self.checkpoint_dir_versioned)
+        all_correct_positions = {}
+        for checkpoint in all_checkpoints:
+            with open(os.path.join(self.checkpoint_dir_versioned, checkpoint), "rb") as f:
+                checkpoint_dict = torch.load(f)
+
+            for batch, pos_dict in checkpoint_dict.items():
+                all_correct_positions[batch] = {}
+                for doc, pos_list in pos_dict.items():
+                    if len(pos_list) == 0:
+                        continue
+                    all_correct_positions[batch][doc] = pos_list
+        self._save_final_dict(all_correct_positions)
+
     def get_correct_sequences(self, seq_length: int) -> None:
         all_checkpoints = os.listdir(self.checkpoint_dir_versioned)
         all_contiguous_positions = {}
@@ -89,6 +106,9 @@ class PredictionFilter:
                 checkpoint_dict = torch.load(f)
 
             for batch, pred_dict in checkpoint_dict.items():
+
+
+
                 all_contiguous_positions[batch] = defaultdict(list)
                 for doc, pos_list in pred_dict.items():
                     if len(pos_list) == 0:

@@ -9,18 +9,12 @@ conn = http.client.HTTPSConnection("www.neuronpedia.org")
 headers = { 'X-Api-Key': "bfbdaf32-118d-41a6-81db-ee8ee2e030ed" }
 
 # Feature array
-feats = np.array([33990, 39052, 33206, 35355, 11046, 40337, 12221, 20298, 25443,
-       20084,  2863, 45072, 34437, 31080,  9325, 37974,  4142, 41231,
-       14632, 28057, 44333, 42403,  3997, 32129, 17363, 25412, 31646,
-       32647, 44893, 26684,   321, 37630, 18380,  8515, 32556, 11911,
-        9190, 15501, 29084, 21868,  1343, 29012, 24183, 23024, 18912,
-        1401, 49576, 48600, 47988, 27386, 48063, 24045, 20557, 48334,
-       21726, 38086, 21032, 12151, 18378, 40012, 41420, 28313, 17898,
-       45691, 26097, 36999, 47885, 34220,   763,  5879, 48809,  1230,
-       36280, 47575, 37439,  8673, 18947,  8209, 46168, 19671, 12485,
-       43617, 10802, 28005, 13442, 30510, 40889,  9123, 38418, 10715,
-       25262, 12214, 43511, 36937, 15313, 19006, 18115, 43100, 32760,
-       27083])
+
+
+# Generate a random sample of 1000 numbers from 0 to 24000 without replacement
+np.random.seed(42)
+feats = np.random.choice(np.arange(24001), size=1000, replace=False)
+
 
 # Create dataset folder if it doesn't exist
 dataset_dir = "../dataset"
@@ -46,9 +40,8 @@ def save_feature_data(feature_id):
         if file_name in processed_features:
             print(f"Feature {feature_id} already processed. Skipping...")
             return
-        
         # Make request
-        conn.request("GET", f"/api/feature/gpt2-small/5-att-kk/{feature_id}", headers=headers)
+        conn.request("GET", f"/api/feature/gpt2-small/5-tres-dc/{feature_id}", headers=headers)
         res = conn.getresponse()
         
         # Read response data

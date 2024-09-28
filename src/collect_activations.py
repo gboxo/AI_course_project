@@ -18,7 +18,7 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader, dataset
 from tqdm import tqdm
 from collections import defaultdict
-from sae_utils import get_attention_sae_dict
+from sae_utils import get_attention_sae_dict,get_attention_sae_out_dict
 from transformer_lens.ActivationCache import ActivationCache
 from typing import List,Dict, Tuple,Any, Optional, Literal
 from jaxtyping import Int, Float 
@@ -110,7 +110,7 @@ class ActivationsColector:
 
 
         if self.cat_activations:
-            assert self.average == True, "If cat_activations they must be averaged"
+            #assert self.average == True, "If cat_activations they must be averaged"
             self.get_cat_modules()
         if load:
             assert filename is not None, "The filename must be provided"
@@ -152,7 +152,8 @@ class ActivationsColector:
                 layers.append(int(module.split(".")[1].replace("L","")))
 
 
-            self.saes_dict = get_attention_sae_dict(layers,device = self.device)
+            #self.saes_dict = get_attention_sae_dict(layers,device = self.device)
+            self.saes_dict = get_attention_sae_out_dict(layers,device = self.device)
             
 
             filter_sae_acts = lambda name: ("hook_sae_acts_post" in name)

@@ -52,6 +52,36 @@ def attn_sae_cfg_to_hooked_sae_cfg(attn_sae_cfg,device):
     return new_cfg
 
 
+
+def get_attention_sae_out_dict(layers: Optional[List[Int]],
+                           all_layers: Optional[bool] =  False,
+                           device = "cpu") -> Dict[str, SAE]:
+
+
+    if all_layers:
+        assert layers is None, "If all_layers is True, layers must be None"
+    else:
+        assert layers is not None, "If all_layers is False, layers must be provided"
+    saes_dict = {}
+    if all_layers:
+        layers = list(range(12))
+
+    for l in layers:
+
+        
+        sae, cfg_dict, sparsity = SAE.from_pretrained(
+                release = "gpt2-small-attn-out-v5-32k",
+                sae_id = f"blocks.{l}.hook_attn_out",
+                device = device, 
+                )
+        cfg = SAEConfig.from_dict(cfg_dict)
+        sae.cfg = cfg
+        saes_dict[f"blocks.{l}.hook_attn_out"] = sae
+    return saes_dict
+
+
+
+
 def get_attention_sae_dict(layers: Optional[List[Int]],
                            all_layers: Optional[bool] =  False,
                            device = "cpu") -> Dict[str, SAE]:
