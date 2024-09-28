@@ -183,7 +183,7 @@ if __name__ == "__main__":
     #print(attrb_threshold_dict)
 
 
-    with open("full_dataset_filter.json","r") as f:
+    with open("full_dataset.json","r") as f:
         full_dataset = json.load(f)
     
 
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     i = 0
     for feat,feat_dict in tqdm.tqdm(full_dataset.items()):
         for eg_id,elem_list in feat_dict.items():
-            pos = elem_list[0]-1
+            pos = elem_list[0]
             toks = elem_list[1]
             toks = torch.tensor(toks).unsqueeze(0)
             attrb_dict,target_act = return_attrb_dict(model, toks, pos, 0.05,int(feat))
@@ -200,9 +200,6 @@ if __name__ == "__main__":
                     continue
             mean_trace = get_trace(attrb_dict)
             comp_trace = {"target_act":target_act,"Mean trace":mean_trace}
-            i+=1
-        if i>10:
-            break
 
             # Save the trace and the target act
             #torch.save(comp_trace,f"app_data/mean_trace_{feat}_{eg_id}.pt")
