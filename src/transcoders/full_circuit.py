@@ -86,27 +86,27 @@ if __name__ == "__main__":
 
 
 
-# How to visualize the full circuit
-"""
-1) Ussing the attribution circuit, get:
-    - The mlp and attn fetures for the first layer
-    - The decoders of those features
-    - The attention score nodes of the second layer 
-2) For each of the attention score nodes:
-    - Get the QK matrices of the corresponding head
-    - Compute the product ussing the feature decoders and the QK matrices
-    - Get the maximum pair of features
-    - Store the features that haven't been used
-3) Get the mlp and attn features of the upstream layers
-    - Get the encoder of those features 
-    - Get decoder feature of attn_out feaures in the first layer 
-4) For each attention score node in the first layer:
-    - Get the OV matrix 
-    - Compute the product using the decoder of attn features, the OV matrix and the encoder of the upstream features
-    - Get the maximum pair of features
-    - Store the features that haven't been used
+    # How to visualize the full circuit
+    """
+    1) Ussing the attribution circuit, get:
+        - The mlp and attn fetures for the first layer
+        - The decoders of those features
+        - The attention score nodes of the second layer 
+    2) For each of the attention score nodes:
+        - Get the QK matrices of the corresponding head
+        - Compute the product ussing the feature decoders and the QK matrices
+        - Get the maximum pair of features
+        - Store the features that haven't been used
+    3) Get the mlp and attn features of the upstream layers
+        - Get the encoder of those features 
+        - Get decoder feature of attn_out feaures in the first layer 
+    4) For each attention score node in the first layer:
+        - Get the OV matrix 
+        - Compute the product using the decoder of attn features, the OV matrix and the encoder of the upstream features
+        - Get the maximum pair of features
+        - Store the features that haven't been used
 
-"""
+    """
 
     custom_order = {"hook_attn_scores":0, "hook_attn_out":1,"hook_mlp_out":2}
 
@@ -138,10 +138,11 @@ if __name__ == "__main__":
     full_circuit["nodes"] = defaultdict(dict) 
     full_circuit["edges"] = []
     max_layer = list(sorted_nodes_dict.keys())[-1]
-    for layer in list(sorted_nodes_dict.keys())[:-1]:
+    for att_scores_layer in list(sorted_nodes_dict.keys())[1:]:
+        layer = att_scores_layer-1
         print(f"Layer {layer}")
         # Get the attention scores node layer 
-        att_scores_layer = layer + 1
+        #att_scores_layer = layer + 1
         # Get the attention scores nodes
         if "attn_scores" not in sorted_nodes_dict[att_scores_layer]:
             continue
@@ -197,57 +198,52 @@ if __name__ == "__main__":
             full_circuit["edges"].append((upstream_features[row_index],att_scores_node,{"attribution":attrb}))
             full_circuit["edges"].append((upstream_features[col_index],att_scores_node,{"attribution":attrb}))
 
-    # Get the decoders of the attention features of this layer
-    attn_nodes = sorted_nodes_dict[att_scores_layer]["hook_attn_out"]
-    attn_features_decoders = [get_decoder(node) for node in attn_nodes]
-    # Get downstream nodes
-    downstream_features = []
-    downstream_feature_encoders = []
-    downstream_features_pos = []
-    for l in range(att_scores_layer,max_layer-1):
-        comp_dict = sorted_nodes_dict[l]
-        for comp, nodes in comp_dict.items():
-            for node in nodes:
-                comp_name = node.hook_point
-                if "embed" in comp_name:
-                    continue 
-                if "scores" in comp_name:
-                    continue
-                downstream_features.append(node)
-                downstream_feature_encoders.append(get_decoder(node))
-                downstream_features_pos.append(int(node.reduction.split(".")[1]))
+        # Get the decoders of the attention features of this layer
+        attn_nodes = sorted_nodes_dict[att_scores_layer]["hook_attn_out"]
+        attn_features_decoders = [get_decoder(node) for node in attn_nodes]
+        attn_features_decoders = torch.stack(attn_features_decoders)
+        # Get downstream nodes
+        downstream_features = []
+        downstream_feature_encoders = []
+        downstream_features_pos = []
+        for l in range(att_scores_layer,max_layer):
+            comp_dict = sorted_nodes_dict[l]
+            for comp, nodes in comp_dict.items():
+                for node in nodes:
+                    comp_name = node.hook_point
+                    if "embed" in comp_name:
+                        continue 
+                    if "scores" in comp_name:
+                        continue
+                    downstream_features.append(node)
+                    downstream_feature_encoders.append(get_decoder(node))
+                    downstream_features_pos.append(int(node.reduction.split(".")[1]))
 
 
 
-        if len(downstream_features) == 0:
-            continue
-        all_encoders = torch.stack(downstream_feature_encoders)
-        all_positions = torch.tensor(downstream_features_pos)
-        # Compute the product
-        for att_scores_node in att_scores_nodes:
-            WO = unique_heads_mat_dict[int(att_scores_node.reduction.split(".")[1])]["WO"]
-            WV = unique_heads_mat_dict[int(att_scores_node.reduction.split(".")[1])]["WV"]
-            dest = int(att_scores_node.reduction.split(".")[2])
-            src = int(att_scores_node.reduction.split(".")[3])
-            mask = all_positions <= dest
-            prod = attn_features_decoders @ WO @ WV.T @ all_encoders.T
-            pair = prod.argmax()
-            row_index = pair // prod.size(1)
-            col_index = pair % prod.size(1)
-            attrb = prod[row_index,col_index]
-            # Add the 3 nodes in thefull circuit
-            # Add the 2 edges in the full circuit
-            full_circuit["edges"].append((attn_nodes[row_index],att_scores_node,{"attribution":attrb}))
-            full_circuit["edges"].append((att_scores_node,downstream_features[col_index],{"attribution":attrb}))
-
-
-
-
-
-
-
-
-
+            if len(downstream_features) == 0:
+                continue
+            all_encoders = torch.stack(downstream_feature_encoders)
+            all_positions = torch.tensor(downstream_features_pos)
+            # Compute the product
+            for att_scores_node in att_scores_nodes:
+                WO = unique_heads_mat_dict[int(att_scores_node.reduction.split(".")[1])]["WO"]
+                WV = unique_heads_mat_dict[int(att_scores_node.reduction.split(".")[1])]["WV"]
+                dest = int(att_scores_node.reduction.split(".")[2])
+                src = int(att_scores_node.reduction.split(".")[3])
+                mask = all_positions <= dest
+                prod = attn_features_decoders @ WV @ WO @ all_encoders.T
+                pair = prod.argmax()
+                row_index = pair // prod.size(1)
+                col_index = pair % prod.size(1)
+                attrb = prod[row_index,col_index]
+                # Add the 3 nodes in thefull circuit
+                # Add the 2 edges in the full circuit
+                full_circuit["nodes"][att_scores_node] = circuit["nodes"][att_scores_node]
+                full_circuit["nodes"][attn_nodes[row_index]] = circuit["nodes"][attn_nodes[row_index]]
+                full_circuit["nodes"][downstream_features[col_index]] = circuit["nodes"][downstream_features[col_index]]
+                full_circuit["edges"].append((att_scores_node,attn_nodes[row_index],{"attribution":attrb}))
+                full_circuit["edges"].append((att_scores_node,downstream_features[col_index],{"attribution":attrb}))
 
 
     visualize_full_circuit(full_circuit)
