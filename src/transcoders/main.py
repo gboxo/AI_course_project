@@ -196,7 +196,7 @@ if __name__ == "__main__":
             pos = elem_list[0]
             toks = elem_list[1]
             toks = torch.tensor(toks).unsqueeze(0)
-            attrb_dict,target_act = return_attrb_dict(model, toks, pos, 0.01,int(feat))
+            attrb_dict,target_act = return_attrb_dict(model, toks, pos, 0,int(feat))
             for key,val in attrb_dict.items():
                 if "scores" in key:
                     continue
