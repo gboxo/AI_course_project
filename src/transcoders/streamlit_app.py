@@ -114,6 +114,21 @@ if page == "Feature Exploration":
     arrays = torch.stack([val for val in top_features.values()],dim = -1).numpy()#[0]
     top_features_df = pd.DataFrame(arrays, columns=columns_alias)
     top_features_df[top_features_df == -1] = " " 
+    comp_dict = {"TC-MLP":"tres-dc","SAE-Attn":"att_32k-oai"}
+
+
+    def add_links(val, col):
+        # Create URL or link for each value (replace 'http://example.com' with your base URL)
+        version = comp_dict[col.split(" ")[1]]
+        layer = int(col.split(" ")[0][-1])
+        url = f"https://www.neuronpedia.org/gpt2-small/{layer}-{version}/{val}"
+        return f'<a href="{url}" target="_blank">{val}</a>'
+
+# Apply lambda function to each cell in the DataFrame
+    for col in top_features_df.columns:
+        top_features_df[col] = top_features_df[col].apply(lambda val: add_links(val, col))
+
+
     distance_tensors = {key:val for key,val in zip(columns_alias,dist_list)}
     total_feat_attrb_per_comp = {key:val.numpy() for key,val in zip(columns_alias,[total_attrb_per_comp[feature][comp] for comp in columns])}
 
@@ -151,8 +166,9 @@ if page == "Feature Exploration":
 
     # Top Features section
     st.header("Section 3: Top Features")
-    st.table(top_features_df)
 
+# Render the DataFrame as an HTML table in Streamlit with links and custom CSS
+    st.markdown(top_features_df.to_html(escape=False), unsafe_allow_html=True)
 
     # Heatmap section
     st.header("Section 4: Heatmap")

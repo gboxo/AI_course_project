@@ -213,7 +213,6 @@ class HierachicalAttributor(Attributor):
             bwd_hooks=[(candidate.hook_point, attribution_score_filter_hooks[candidate][1]) for candidate in candidates]
         ):
             cache = self.cache_nodes(toks, candidates + [target])
-            print("\n".join(list(cache.cache.keys())))
             output_tensor = cache[target]
             cache[target].backward(retain_graph=True)
 
@@ -259,7 +258,6 @@ def join_contexts(model,tcs,saes,candidates):
 # %%
 if __name__ == "__main__":
     model = HookedTransformer.from_pretrained("gpt2",fold_ln=True, fold_value_biases = True)
-    #sae_dict = get_attention_sae_dict(layers = [5])
     sae_dict = get_attention_sae_out_dict(layers = [0,1,2,3,4,5])
     saes = [value for value in sae_dict.values()]
     # %%

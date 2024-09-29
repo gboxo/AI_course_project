@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
 
 
-if True:
+if False:
     # Get the computational trace for each feature
     comp_traces = defaultdict(lambda: defaultdict(dict))
 
