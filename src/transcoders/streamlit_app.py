@@ -139,7 +139,7 @@ if page == "Feature Exploration":
     
 
     # Explanation section
-    st.header("Section 1: Explanation")
+    st.header("Feature Explanation")
     st.write("Explanation for the selected feature from Neuronpedia, description of the feature ussing GPT4-O mini")
 
 
@@ -159,7 +159,7 @@ if page == "Feature Exploration":
 # Display text with the light blue background
     st.markdown(f'<div class="highlight">{explanations[str(feature)]}</div>', unsafe_allow_html=True)
     # Scatter Plot section
-    st.header("Section 2: Scatter Plot")
+    st.header("Target Activation vs. Trace Similarity")
     st.write("Scatter plot of the Trace Similarity vs. Max Activation")
     scatter_fig = px.scatter(df, x="Max Activation",y="Trace Similarity",  title='Trace Similarity vs. Max Activation')
     st.plotly_chart(scatter_fig)
@@ -167,12 +167,25 @@ if page == "Feature Exploration":
     # Top Features section
     st.header("Section 3: Top Features")
 
+    st.write(f"Collection of the top 10 most important features for the fireing of the Feature {feature}, across the components.")
+
+    st.write("The feature activations are collected and aggregated over the dataset and positions.")
+    st.write("Each element in the table links to the corresponding Neuronpedia page.")
+
+
+
 # Render the DataFrame as an HTML table in Streamlit with links and custom CSS
     st.markdown(top_features_df.to_html(escape=False), unsafe_allow_html=True)
 
     # Heatmap section
     st.header("Section 4: Heatmap")
     st.write("Heatmap of the pairwise similarity between the average computational trace of each example.")
+
+
+    st.write("The heatmap displays the pairwise similarity between the average computational trace of each example, for the selected component.")
+    st.write("Browse around the differnt components, in many cases a certain component is not shared across all the examples, this results in a diagonal heatmap.")
+
+
 
     selected_tensor_name = st.selectbox("Select a Distance Matrix:", list(distance_tensors.keys()))
 
@@ -182,6 +195,11 @@ if page == "Feature Exploration":
     df = pd.DataFrame(selected_tensor.numpy(), columns=range(selected_tensor.shape[0]))
 
     st.subheader(f"Heatmap for {selected_tensor_name}")
+
+
+
+
+
     custom_colorscale = 'Plasma'  # You can choose any Plotly colorscale or create a custom one
 
 # Create the heatmap
@@ -196,8 +214,8 @@ if page == "Feature Exploration":
 
     heatmap.update_layout(
         title=f'Heatmap of {selected_tensor_name}',
-        xaxis_title='Example',
-        yaxis_title='Example',
+        xaxis_title='Prompts in the Dataset',
+        yaxis_title='Prompts in the Dataset',
         width=800, 
         height=400,
     )
@@ -208,6 +226,13 @@ if page == "Feature Exploration":
     # Line plot section
     st.header("Section 5: Line Plot")
     st.write("Line plot of the running mean of the average pairwise similarity between the traces of each example.")
+
+
+
+
+
+
+
     # Create a Plotly figure
     fig = go.Figure()
 
@@ -258,9 +283,9 @@ if page == "Feature Exploration":
 
 
     # Comparison section
-    st.header("Section 6: Comparison")
-    st.write("Here is a looping GIF for comparison:")
+    st.header("Running mean similarity matrix over the layers.")
 
+    st.write("We can explore how does the computational trace evolves trough the layers by computing the running mean of the simmilarity matix, as we move trought the layers. This visualization give us hint's of the evolution of the computation.")
     gif_path = f"graph_evolution/graph_evolution_feat_{feature}.gif"  # Replace with your GIF file path
     file_ = open(gif_path, "rb")
     contents = file_.read()
