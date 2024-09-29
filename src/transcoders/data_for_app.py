@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
 
 
-if False:
+if True:
     # Get the computational trace for each feature
     comp_traces = defaultdict(lambda: defaultdict(dict))
 
@@ -313,7 +313,7 @@ if False:
 
 
 
-if False:
+if True:
     import torch
     import os
 

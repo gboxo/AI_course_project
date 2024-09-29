@@ -24,21 +24,6 @@ import base64
 
 
 
-#Components Theory Page:
-#    1. Display the architecture of Transcoders and SAEs, side by side, and their differences.
-#    2. Explain what doest it mean to attribute the activation of a fature in the feature basis.
-#    3. Explain what Hierarchical Attributio is.
-#    4. Explain what the computational trace is.
-#    5. What about error nodes
-#    6. Citations
-
-
-
-#Components Comparison Page:
-#    3. Display a GIF of the evolution of the graph of the similarity between the computational trace of the features.
-#    4. Display a graph of the every example trace pairwise similarity, colorize the nodes by the class they belong to. (Make sure that the closer nodes are actually closer in the graph)
-
-
 
 feat_sims = torch.load("feat_sims.pt")
 feats = feat_sims["feats"].tolist()
@@ -55,7 +40,6 @@ comp_traces = torch.load("comp_traces.pt")
 #comp_traces = {k: comp_traces[k] for k in dist_comp.keys()}
 feats = list(comp_traces.keys())
 # This must be interchanged with Max Act ASAP
-total_attrb = defaultdict(dict) 
 
 # Filter for present features
 bool_array = np.array([f in feats for f in feat_sims["feats"]])
@@ -64,11 +48,11 @@ feat_sims["dec"] = feat_sims["dec"][bool_array][:,bool_array]
 feat_sims["feats"] = np.array(feat_sims["feats"])[bool_array].tolist()
 
 
+total_attrb = defaultdict(dict) 
 
 for feat,trace in comp_traces.items():
     for ex_idx,ex_trace in trace.items():
-        ex_trace = ex_trace["Mean trace"]
-        total_attrb[feat][ex_idx] = sum([val.detach().sum() for val in ex_trace.values()]) 
+        total_attrb[feat][ex_idx] = ex_trace["target_act"]
 
 total_attrb_per_comp = defaultdict(dict) 
 for feat,trace in comp_traces.items():
@@ -111,7 +95,8 @@ if page == "Feature Exploration":
     all_dists = torch.stack(dist_list)
     average_dist = all_dists.mean(dim = 0) 
     mean_average_dist = average_dist.mean(dim = 0)
-    total_feat_attrb = torch.stack([val for val in total_attrb[feature].values()])
+    total_feat_attrb = total_attrb[feature]
+    total_feat_attrb = torch.tensor([val for val in total_feat_attrb.values()])
     x = torch.stack((mean_average_dist,total_feat_attrb),dim = 0).numpy()
     df = pd.DataFrame(x.T, columns=["Trace Similarity","Max Activation"])
     top_features = top_components[feature]
@@ -121,7 +106,7 @@ if page == "Feature Exploration":
     for col in columns:
         layer = col.split(".")[1]
         comp = col.split(".")[2]
-        if comp == "attn":
+        if comp == "hook_attn_out":
             comp = "SAE-Attn"
         elif comp == "hook_mlp_out":
             comp = "TC-MLP"
@@ -181,16 +166,29 @@ if page == "Feature Exploration":
     df = pd.DataFrame(selected_tensor.numpy(), columns=range(selected_tensor.shape[0]))
 
     st.subheader(f"Heatmap for {selected_tensor_name}")
-    plt.figure(figsize=(8, 4))
-    sns.heatmap(df, annot=False, cmap='coolwarm', fmt='g', cbar=True)
-    plt.title(f'Heatmap of {selected_tensor_name}')
-    plt.xlabel('Example')
-    plt.ylabel('Example')
+    custom_colorscale = 'Plasma'  # You can choose any Plotly colorscale or create a custom one
 
-    st.pyplot(plt)
+# Create the heatmap
+    heatmap = go.Figure(data=go.Heatmap(
+        z=df.values,
+        x=df.columns[::-1],  # Reversing the x-axis to flip horizontally (if needed)
+        y=df.index[::-1],    # Reversing the y-axis to flip vertically (if needed)
+        colorscale=custom_colorscale,  # Use the custom colorscale
+        colorbar=dict(title='Scale'),
+    ))
 
-    # Clear the plot after showing it
-    plt.clf()
+
+    heatmap.update_layout(
+        title=f'Heatmap of {selected_tensor_name}',
+        xaxis_title='Example',
+        yaxis_title='Example',
+        width=800, 
+        height=400,
+    )
+
+# Display the Plotly figure in Streamlit
+    st.plotly_chart(heatmap)
+
     # Line plot section
     st.header("Section 5: Line Plot")
     st.write("Line plot of the running mean of the average pairwise similarity between the traces of each example.")
@@ -247,8 +245,7 @@ if page == "Feature Exploration":
     st.header("Section 6: Comparison")
     st.write("Here is a looping GIF for comparison:")
 
-    gif_path = "graph_evolution.gif"  # Replace with your GIF file path
-    """### gif from local file"""
+    gif_path = f"graph_evolution/graph_evolution_feat_{feature}.gif"  # Replace with your GIF file path
     file_ = open(gif_path, "rb")
     contents = file_.read()
     data_url = base64.b64encode(contents).decode("utf-8")
@@ -334,7 +331,7 @@ elif page == "Comparisons":
     # Display the scatter plot
     st.header("Encoder Similarity vs Trace Similarity")
     st.write("Scatter plot of the similarity between the encoder of two features vs. the similarity between the computational trace of the same two features averaged over the examples.")
-    x = torch.stack((avg_dist.triu(1).reshape(-1),feat_sims["enc"].triu(1).reshape(-1)),dim = 0).numpy()
+    x = torch.stack((avg_dist.triu(1).reshape(-1),feat_sims["enc"].triu(1).reshape(-1)),dim = 0).detach().numpy()
     df = pd.DataFrame(x.T, columns=["Trace Similarity","Encoder Similarity"])
     scatter_fig = px.scatter(df, x="Trace Similarity", y="Encoder Similarity", title='Encoder Similarity vs Trace Similarity')
     st.plotly_chart(scatter_fig)
@@ -344,7 +341,7 @@ elif page == "Comparisons":
 
     st.header("Decoder Similarity vs Trace Similarity")
     st.write("Scatter plot of the similarity between the decoder of two features vs. the similarity between the computational trace of the same two features averaged over the examples.")
-    x = torch.stack((avg_dist.triu(1).reshape(-1),feat_sims["dec"].triu(1).reshape(-1)),dim = 0).numpy()
+    x = torch.stack((avg_dist.triu(1).reshape(-1),feat_sims["dec"].triu(1).reshape(-1)),dim = 0).detach().numpy()
     df = pd.DataFrame(x.T, columns=["Trace Similarity","Decoder Similarity"])
     scatter_fig = px.scatter(df, x="Trace Similarity", y="Decoder Similarity", title='Decoder Similarity vs Trace Similarity')
     st.plotly_chart(scatter_fig)

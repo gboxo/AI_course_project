@@ -1,6 +1,5 @@
-
 import torch
-import torch
+import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -8,30 +7,25 @@ from matplotlib.colors import LinearSegmentedColormap
 import imageio
 import os
 
-
-
-# Create a graph with the distance matrix of each dictionary entry
-
-
-
 def compute_running_mean(matrices):
     running_mean = []
     for i, matrix in enumerate(matrices):
         if i == 0:
             running_mean.append(matrix)
         else:
-            running_mean.append((i*running_mean[-1] + matrix) / (i + 1))
+            running_mean.append((i * running_mean[-1] + matrix) / (i + 1))
     return running_mean
 
 def create_graph_from_matrix(matrix):
     G = nx.Graph()
     n = matrix.shape[0]
     for i in range(n):
-        for j in range(i+1, n):
+        for j in range(i + 1, n):
             # Use the inverse of the distance as the edge weight
             # Adding a small epsilon to avoid division by zero
             G.add_edge(i, j, weight=(matrix[i, j] + 1e-6))
     return G
+
 def plot_graph(G, pos, iteration, output_file):
     plt.figure(figsize=(10, 10))
     edges = G.edges()
@@ -74,37 +68,42 @@ def create_gif(png_files, output_gif, duration=1):
     imageio.mimsave(output_gif, images, duration=duration_ms, loop=0)
 
 if __name__ == '__main__':
-    dist_comp = torch.load("app_data/feat_pairwise_dist_comp.pt")
-    keys = list(dist_comp.keys())
-    keys.sort()
-    dist_comp = {k: dist_comp[k] for k in keys}
-    matrices = [tensor.numpy() for tensor in dist_comp.values()]
-    running_means = compute_running_mean(matrices)
+    dist_comp = torch.load("dist_comp.pt")
+    features = list(dist_comp.keys())
 
-# Generate a fixed layout for consistent node positions
-    G = create_graph_from_matrix(running_means[0])
-    pos = nx.spring_layout(G)
+    for feature in tqdm.tqdm(features):
+        feat_dist_comp = dist_comp[feature]
+        keys = list(feat_dist_comp.keys())
+        keys.sort()
+        feat_dist_comp = {k: feat_dist_comp[k] for k in keys}
+        matrices = [tensor.numpy() for tensor in feat_dist_comp.values()]
+        running_means = compute_running_mean(matrices)
 
-# Create a temporary directory to store PNG files
-    temp_dir = 'temp_png_files'
-    os.makedirs(temp_dir, exist_ok=True)
+        # Generate a layout based on a spring layout (force-directed)
+        # Create the initial graph and layout
+        G = create_graph_from_matrix(running_means[0])
+        pos = nx.spring_layout(G)  # Use force-directed layout
 
-    png_files = []
-    for i, matrix in enumerate(running_means):
-        G = create_graph_from_matrix(matrix)
-        output_file = os.path.join(temp_dir, f"graph_evolution_{i:03d}.png")
-        plot_graph(G, pos, list(dist_comp.keys())[i], output_file)
-        png_files.append(output_file)
+        # Create a temporary directory to store PNG files
+        temp_dir = 'temp_png_files'
+        os.makedirs(temp_dir, exist_ok=True)
 
-# Create the GIF
-    output_gif = "graph_evolution.gif"
-    create_gif(png_files, output_gif,duration = 1)
+        png_files = []
+        for i, matrix in enumerate(running_means):
+            G = create_graph_from_matrix(matrix)
+            # Update positions with a force-directed layout at each iteration
+            pos = nx.spring_layout(G, pos=pos, iterations=50)  # Adjust iterations as needed
+            output_file = os.path.join(temp_dir, f"graph_evolution_{i:03d}.png")
+            plot_graph(G, pos, list(feat_dist_comp.keys())[i], output_file)
+            png_files.append(output_file)
 
-# Clean up temporary PNG files
-    for file in png_files:
-        os.remove(file)
-    os.rmdir(temp_dir)
+        # Create the GIF
+        output_gif = f"graph_evolution/graph_evolution_feat_{feature}.gif"
+        create_gif(png_files, output_gif, duration=1)
 
-    print(f"GIF has been created: {output_gif}")
+        # Clean up temporary PNG files
+        for file in png_files:
+            os.remove(file)
+        os.rmdir(temp_dir)
 
 

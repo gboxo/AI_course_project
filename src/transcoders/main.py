@@ -41,7 +41,6 @@ def return_attrb_dict(model, toks,pos,threshold,feat):
                 name_filter +=  [f"blocks.{i}.attn.hook_pattern" for i in range(6)]             
             output, cache = run_with_ref_cache(model,toks = toks, names_filter=name_filter)
             target_act = cache["blocks.5.hook_mlp_out.sae.hook_hidden_post.post"][0][pos,feat].item()
-            print(target_act)
 
 
 
@@ -182,10 +181,13 @@ if __name__ == "__main__":
     #attrb_threshold_dict = get_attribution_fraction(model, toks, 9, thresholds,8506)
     #print(attrb_threshold_dict)
 
-
+    feat_sims = torch.load("feat_sims.pt")
+    feats = feat_sims["feats"]
+    del feat_sims
     with open("full_dataset.json","r") as f:
         full_dataset = json.load(f)
-    
+    full_dataset = {key:val for key,val in full_dataset.items() if int(key) in feats}
+        
 
 
     i = 0
@@ -194,7 +196,7 @@ if __name__ == "__main__":
             pos = elem_list[0]
             toks = elem_list[1]
             toks = torch.tensor(toks).unsqueeze(0)
-            attrb_dict,target_act = return_attrb_dict(model, toks, pos, 0.05,int(feat))
+            attrb_dict,target_act = return_attrb_dict(model, toks, pos, 0.01,int(feat))
             for key,val in attrb_dict.items():
                 if "scores" in key:
                     continue
@@ -202,7 +204,7 @@ if __name__ == "__main__":
             comp_trace = {"target_act":target_act,"Mean trace":mean_trace}
 
             # Save the trace and the target act
-            #torch.save(comp_trace,f"app_data/mean_trace_{feat}_{eg_id}.pt")
+            torch.save(comp_trace,f"app_data/mean_trace_{feat}_{eg_id}.pt")
 
 
 
