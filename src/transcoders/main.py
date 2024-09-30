@@ -90,7 +90,7 @@ import gc
 def get_attribution_fraction(model, toks, pos, thresholds,feat):
     # Get the attribution with threhsold 0
     attrb_threshold_dict = {}
-    for threshold in [0]+thresholds:
+    for threshold in thresholds+[0]:
         attrb_dict,_ = return_attrb_dict(model, toks, pos, threshold,feat)
         total_attrb = 0
         for key,val in attrb_dict.items():
@@ -116,7 +116,7 @@ def get_attribution_fraction_dataet(model,dataset):
     all_tuples = []
     all_fractions = []
     for tokens in tqdm.tqdm(dataset["tokens"]):
-        max_feat = get_max_act(model,tokens)
+        #max_feat = get_max_act(model,tokens)
         attrb_dict,target_act = return_attrb_dict(model, tokens, 31, 0.05,max_feat)
         total_attrb = 0
         for key,val in attrb_dict.items():
@@ -187,24 +187,68 @@ if __name__ == "__main__":
     with open("full_dataset.json","r") as f:
         full_dataset = json.load(f)
     full_dataset = {key:val for key,val in full_dataset.items() if int(key) in feats}
+    dataset = {key:[v for v in val.values()][0] for key,val in full_dataset.items()} 
+    all_fractions_dicts = []
+    for key,val in tqdm.tqdm(dataset.items()):
+        pos = val[0]
+        toks = val[1]
+        toks = torch.tensor(toks).unsqueeze(0)
+        frction_dict = get_attribution_fraction(model, toks, pos, [0.05,0.025,0.0125,0.00625,0.001],int(key))
+        all_fractions_dicts.append(frction_dict)
+
         
+    
+    for i,val_dict in enumerate(all_fractions_dicts):
+        for threshold, val in val_dict.items():
+            all_fractions_dicts[i][threshold] = val.detach().item()
 
+    for i,val_dict in enumerate(all_fractions_dicts):
+        total_attrb = val_dict[0]
+        for threshold, val in val_dict.items():
+            all_fractions_dicts[i][threshold] = val/total_attrb
 
-    i = 0
-    for feat,feat_dict in tqdm.tqdm(full_dataset.items()):
-        for eg_id,elem_list in feat_dict.items():
-            pos = elem_list[0]
-            toks = elem_list[1]
-            toks = torch.tensor(toks).unsqueeze(0)
-            attrb_dict,target_act = return_attrb_dict(model, toks, pos, 0,int(feat))
-            for key,val in attrb_dict.items():
-                if "scores" in key:
-                    continue
-            mean_trace = get_trace(attrb_dict)
-            comp_trace = {"target_act":target_act,"Mean trace":mean_trace}
+    all_dicts = defaultdict(dict) 
+    for i,val_dict in enumerate(all_fractions_dicts):
+        feat = list(dataset.keys())[i]
+        for threshold, val in val_dict.items():
+            all_dicts[feat][threshold] = val
+    
+    torch.save(all_dicts,"attribution_fractions.pt")
+    # plot a lineplot for each feature
+
+    all_dicts = torch.load("attribution_fractions.pt")
+    plt.figure(figsize=(10, 6))
+
+    for key, val in all_dicts.items():
+        plt.plot(list(val.keys()), list(val.values()), label=key)
+
+    plt.xlabel("Threshold")  # Replace with an appropriate label
+    plt.ylabel("Fraction")  # Replace with an appropriate label
+    plt.title("Attribution Fractions Plot")  # Replace with a suitable title
+
+    plt.grid(True)
+
+    plt.gca().invert_xaxis()
+    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=10, ncol=2)  # ncol=2 splits legend into 2 columns
+    plt.tight_layout()
+
+    plt.savefig("attribution_fractions_plot.png")
+
+    #i = 0
+    #for feat,feat_dict in tqdm.tqdm(full_dataset.items()):
+    #    for eg_id,elem_list in feat_dict.items():
+    #        pos = elem_list[0]
+    #        toks = elem_list[1]
+    #        toks = torch.tensor(toks).unsqueeze(0)
+    #        attrb_dict,target_act = return_attrb_dict(model, toks, pos, 0,int(feat))
+    #        for key,val in attrb_dict.items():
+    #            if "scores" in key:
+    #                continue
+    #        mean_trace = get_trace(attrb_dict)
+    #        comp_trace = {"target_act":target_act,"Mean trace":mean_trace}
 
             # Save the trace and the target act
-            torch.save(comp_trace,f"app_data/mean_trace_{feat}_{eg_id}.pt")
+     #       torch.save(comp_trace,f"app_data/mean_trace_{feat}_{eg_id}.pt")
 
 
 
